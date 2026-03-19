@@ -56,7 +56,7 @@
               <div class="stock-meta">
                 <div class="stock-name-row">
                   <h1 id="selectedName">한강테크</h1>
-                  <button class="favorite-toggle" id="favoriteToggleBtn" type="button">☆</button>
+                  <button class="favorite-toggle" id="favoriteToggleBtn" type="button" title="즐겨찾기">☆</button>
                 </div>
 
                 <div class="stock-code" id="selectedCode">KQ001 · AI 반도체</div>
@@ -128,9 +128,9 @@
               <div class="chart-tooltip hidden" id="chartTooltip"></div>
             </div>
 
-            <div class="selected-news-wrap">
+            <div class="selected-news-block">
               <div class="selected-news-head">
-                <h3 id="selectedNewsTitle">해당 종목 뉴스 · 이벤트</h3>
+                <h3><span id="selectedNewsTitleName">한강테크</span> 뉴스 · 이벤트</h3>
                 <span class="small-chip" id="selectedNewsCount">0건</span>
               </div>
               <div id="selectedNewsFeed" class="selected-news-feed"></div>
@@ -147,18 +147,7 @@
                 </div>
               </div>
 
-              <div class="order-top-card">
-                <div class="order-top-left">
-                  <div class="order-top-stock" id="orderTopStockName">한강테크</div>
-                  <div class="order-top-price" id="orderTopPrice">0원</div>
-                </div>
-                <div class="order-top-right">
-                  <div class="order-top-rate-label">등락률</div>
-                  <div class="order-top-rate" id="orderTopRate">+0.00%</div>
-                </div>
-              </div>
-
-              <div class="metric-grid">
+              <div class="order-summary-grid">
                 <div class="metric-card">
                   <span>주문 가능 현금</span>
                   <b id="availableCash">0원</b>
@@ -182,24 +171,26 @@
                 <button class="trade-mode" id="sellModeBtn" type="button">매도</button>
               </div>
 
-              <div class="form-group">
-                <label for="orderPrice">주문 가격</label>
-                <input id="orderPrice" type="number" min="1" step="1" />
+              <div class="trade-fields-card">
+                <div class="form-group">
+                  <label for="orderPrice">주문 가격</label>
+                  <input id="orderPrice" type="number" min="1" step="1" />
+                </div>
+
+                <div class="form-group">
+                  <label for="orderQty">수량</label>
+                  <input id="orderQty" type="number" min="1" step="1" value="1" />
+                </div>
+
+                <div class="quick-row" id="quickRow"></div>
+
+                <div class="estimate-box">
+                  <div><span>예상 주문금액</span><b id="estimatedCost">0원</b></div>
+                  <div><span>예상 수수료</span><b id="estimatedFee">0원</b></div>
+                </div>
+
+                <button class="primary-order-btn buy" id="submitOrderBtn" type="button">매수 실행</button>
               </div>
-
-              <div class="form-group">
-                <label for="orderQty">수량</label>
-                <input id="orderQty" type="number" min="1" step="1" value="1" />
-              </div>
-
-              <div class="quick-row" id="quickRow"></div>
-
-              <div class="estimate-box">
-                <div><span>예상 주문금액</span><b id="estimatedCost">0원</b></div>
-                <div><span>예상 수수료</span><b id="estimatedFee">0원</b></div>
-              </div>
-
-              <button class="primary-order-btn buy" id="submitOrderBtn" type="button">매수 실행</button>
             </div>
 
             <div class="panel orderbook-panel">
