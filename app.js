@@ -1,730 +1,151 @@
-const START_CASH = 1_000_000;
-const RESCUE_CASH = 1_000_000;
+const STORAGE_KEY = "k_mock_trading_pro_v2";
+const NEWS_LIMIT = 80;
+const ORDER_LIMIT = 160;
+const ALERT_LIMIT = 160;
+const CANVAS_W = 1200;
+const CANVAS_H = 650;
 
-const NEWS_CHANCE_PER_TICK = 0.014;
-const SHOCK_CHANCE_PER_TICK = 0.0045;
-const SHOCK_MIN = 0.08;
-const SHOCK_MAX = 0.20;
-
-const LIMIT_UP_PCT = 0.30;
-const LIMIT_DOWN_PCT = 0.30;
-const HALT_TICKS = 25;
-
-const HISTORY_LEN = 240;
-const TAPE_LEN = 20;
-const INVESTOR_HISTORY_LEN = 7;
-const CANDLE_LIMIT = 140;
-const TICKS_PER_CANDLE = 5;
-
-const FEE_RATE = 0.001;
-const SLIPPAGE_RATE = 0.0006;
-
-const STORAGE_KEY = "k_mock_stock_pro_v3";
-
-const REGIMES = {
-  CALM: { label: "보합권", move: 0.010, eventMul: 0.95, bias: 0.0000, mood: "📍 보합 흐름", cls: "calm" },
-  MANIA: { label: "강세장", move: 0.028, eventMul: 1.70, bias: 0.0018, mood: "🔥 매수세 우위", cls: "mania" },
-  CRASH: { label: "약세장", move: 0.024, eventMul: 1.50, bias: -0.0022, mood: "❄️ 매도세 우위", cls: "crash" }
-};
-
-const SPARKS = "▁▂▃▄▅▆▇█";
-
-const STOCK_CATALOG = [
-  { symbol: "HBT", name: "한빛테크", color: "#ef4444", sector: "IT", theme: "AI · 반도체", desc: "AI 서버와 차세대 연산 칩을 개발하는 고성장 기술주" },
-  { symbol: "MBB", name: "미래바이오", color: "#8b5cf6", sector: "바이오", theme: "신약 · 헬스케어", desc: "항암 신약 파이프라인과 정밀의료 플랫폼을 보유한 바이오주" },
-  { symbol: "DHM", name: "대한모빌리티", color: "#f59e0b", sector: "자동차", theme: "전기차 · 자율주행", desc: "전기차 구동계와 자율주행 솔루션을 확대 중인 모빌리티 기업" },
-  { symbol: "NEE", name: "네오엔터", color: "#ec4899", sector: "게임", theme: "게임 · 콘텐츠", desc: "라이브 서비스와 IP 확장을 동시에 노리는 엔터테인먼트 기업" },
-  { symbol: "LNE", name: "루나에너지", color: "#10b981", sector: "에너지", theme: "2차전지 · ESS", desc: "배터리 소재와 에너지 저장장치 사업을 함께 키우는 친환경 기업" },
-  { symbol: "CRL", name: "코어로직", color: "#06b6d4", sector: "소프트웨어", theme: "클라우드 · SaaS", desc: "클라우드 전환 솔루션과 기업용 AI 자동화를 제공하는 플랫폼 기업" },
-  { symbol: "ATK", name: "아르테크", color: "#84cc16", sector: "기계", theme: "로봇 · 자동화", desc: "산업용 로봇과 물류 자동화 설비를 공급하는 로봇 테마주" },
-  { symbol: "FCP", name: "핀캐피탈", color: "#6366f1", sector: "금융", theme: "핀테크 · 결제", desc: "간편결제와 디지털 자산 관리 서비스를 확장하는 금융 플랫폼" }
+const STOCK_SEED = [
+  { code: "KQ001", name: "한강테크", logo: "한", base: 48200, shares: 4200000, theme: "AI 반도체" },
+  { code: "KQ002", name: "네오바이오", logo: "네", base: 32150, shares: 3200000, theme: "바이오 신약" },
+  { code: "KQ003", name: "블루모빌리티", logo: "블", base: 187000, shares: 1700000, theme: "전기차 부품" },
+  { code: "KQ004", name: "코어엔터", logo: "코", base: 12950, shares: 6700000, theme: "엔터/플랫폼" },
+  { code: "KQ005", name: "스카이로직스", logo: "스", base: 85300, shares: 2800000, theme: "물류 자동화" },
+  { code: "KQ006", name: "오로라게임즈", logo: "오", base: 56700, shares: 3500000, theme: "게임/콘텐츠" },
+  { code: "KQ007", name: "에코플랜트", logo: "에", base: 104500, shares: 2900000, theme: "친환경 소재" },
+  { code: "KQ008", name: "미래핀테크", logo: "미", base: 72200, shares: 3100000, theme: "핀테크" },
+  { code: "KQ009", name: "제니스AI", logo: "제", base: 243500, shares: 1500000, theme: "초거대 AI" },
+  { code: "KQ010", name: "라이트메드", logo: "라", base: 41550, shares: 4900000, theme: "헬스케어" },
+  { code: "KQ011", name: "웨이브로보틱스", logo: "웨", base: 96400, shares: 2100000, theme: "로봇/공장자동화" },
+  { code: "KQ012", name: "트리온클라우드", logo: "트", base: 138800, shares: 2600000, theme: "클라우드" }
 ];
 
-const RIVAL_NAMES = ["레드펀드", "블루캐피탈", "알파투자", "스카이자산", "넥스트홀딩스", "골든리버", "노바트레이드"];
+const breakingTemplates = [
+  "{name}, 장중 수급 집중되며 변동성 확대",
+  "{name}, 외국인 매수세 유입 추정",
+  "{name}, 개인 투자자 관심 급증",
+  "{name}, 단기 과열 구간 진입 가능성 부각",
+  "{name}, 시세 급등 속 거래량 폭증",
+  "{name}, 장 초반 급등 이후 매물 소화 진행",
+  "{name}, 기관 추정 매수세로 강세 흐름",
+  "{name}, 테마 확산 기대감 속 주목"
+];
 
-const SPEED_MODES = [1000, 500, 250, 167, 125, 100];
+const goodTemplates = [
+  "{name}, 신규 계약 기대감으로 투자심리 개선",
+  "{name}, 실적 기대감 반영되며 상승 탄력 강화",
+  "{name}, 업황 개선 수혜 기대감 부각",
+  "{name}, 차세대 사업 확장 기대에 강세",
+  "{name}, AI/로봇/바이오 테마 순환매 수혜",
+  "{name}, 기술적 돌파 시도에 매수세 확대",
+  "{name}, 시장 내 대표 수혜주로 재부각",
+  "{name}, 증권가 관심주 편입 기대감"
+];
 
-const $ = (sel) => document.querySelector(sel);
+const warnTemplates = [
+  "{name}, 단기 급등에 따른 차익실현 매물 주의",
+  "{name}, 변동성 확대 구간 진입",
+  "{name}, 장중 흔들림 확대 가능성 유의",
+  "{name}, 거래량 감소 속 탄력 둔화 주의",
+  "{name}, 급등 이후 추격 매수 주의보",
+  "{name}, 고점 부근 매물 압박 가능성",
+  "{name}, 호재성 이슈 소멸 시 변동성 확대 우려",
+  "{name}, 당일 등락폭 커지며 리스크 확대"
+];
 
-function randInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+const eventTemplates = [
+  "{name}, 장 마감 브리핑 관심 종목 선정",
+  "{name}, 투자자 토론방 언급량 급증",
+  "{name}, 테마 이벤트 발생으로 관심 확대",
+  "{name}, 시장 리포트 상위 조회 종목 진입",
+  "{name}, 급등주/저평가주 후보로 부상",
+  "{name}, 당일 관심 검색어 상위권 진입",
+  "{name}, 기관/외인 수급 관측 이벤트 발생",
+  "{name}, 변동성 상위 종목으로 편입"
+];
+
+const state = {
+  speed: 1,
+  selectedCode: "KQ001",
+  orderMode: "buy",
+  sortBy: "change",
+  searchTerm: "",
+  chartRange: "1m",
+  hoverIndex: -1,
+  alertCount: 0,
+  marketAlertCount: 0,
+  stocks: [],
+  favorites: [],
+  news: [],
+  alerts: [],
+  orderHistory: [],
+  portfolio: {
+    cash: 10000000,
+    holdings: {}
+  }
+};
+
+const els = {};
+
 function rand(min, max) {
   return Math.random() * (max - min) + min;
 }
-function fmtWon(x) {
-  return `${Math.round(x).toLocaleString("ko-KR")}원`;
-}
-function fmtNum(x) {
-  return `${Math.round(x).toLocaleString("ko-KR")}`;
-}
-function fmtPct(x) {
-  const sign = x >= 0 ? "+" : "";
-  return `${sign}${x.toFixed(2)}%`;
-}
-function fmtSignedWon(x) {
-  const sign = x >= 0 ? "+" : "";
-  return `${sign}${fmtWon(x)}`;
-}
-function fmtSignedNum(x) {
-  const sign = x >= 0 ? "+" : "";
-  return `${sign}${Math.round(x).toLocaleString("ko-KR")}`;
-}
-function clampPrice(p) {
-  return Math.max(1, p);
-}
-function fee(cost) {
-  return cost * FEE_RATE;
-}
-function execPrice(marketPrice, side) {
-  return side === "BUY"
-    ? marketPrice * (1 + SLIPPAGE_RATE)
-    : marketPrice * (1 - SLIPPAGE_RATE);
-}
-function sparkline(values) {
-  if (!values || values.length === 0) return "—";
-  const vmin = Math.min(...values);
-  const vmax = Math.max(...values);
-  if (vmin === vmax) return SPARKS[0].repeat(values.length);
-  return values.map(v => {
-    const t = (v - vmin) / (vmax - vmin);
-    const idx = Math.floor(t * (SPARKS.length - 1));
-    return SPARKS[idx];
-  }).join("");
-}
-function moveClass(delta, halted, limitState) {
-  if (halted) return "neutral";
-  if (limitState === "UP") return "up";
-  if (limitState === "DOWN") return "down";
-  if (delta > 0) return "up";
-  if (delta < 0) return "down";
-  return "neutral";
-}
-function trendWord(delta, halted, limitState) {
-  if (halted) return "거래정지";
-  if (limitState === "UP") return "상한가";
-  if (limitState === "DOWN") return "하한가";
-  if (delta > 0) return "상승";
-  if (delta < 0) return "하락";
-  return "보합";
-}
-function ratioBar(rate) {
-  const r = Math.max(-10, Math.min(10, rate));
-  const total = 10;
-  let red = 0;
-  let blue = 0;
-  if (r >= 0) red = Math.round((r / 10) * total);
-  else blue = Math.round((Math.abs(r) / 10) * total);
-  return "🟥".repeat(red) + "⬜".repeat(total - red - blue) + "🟦".repeat(blue);
-}
-function todayLabel(offset = 0) {
-  const d = new Date(Date.now() - offset * 86400000);
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${mm}.${dd}`;
-}
-function average(arr) {
-  if (!arr.length) return 0;
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
-}
-function calcMA(candles, period) {
-  const out = [];
-  for (let i = 0; i < candles.length; i++) {
-    if (i + 1 < period) {
-      out.push(null);
-      continue;
-    }
-    const slice = candles.slice(i + 1 - period, i + 1);
-    out.push(average(slice.map(c => c.close)));
-  }
-  return out;
-}
-function newsTagType(text) {
-  if (text.includes("호재") || text.includes("급등") || text.includes("고래매수") || text.includes("실적 상향")) return "good";
-  if (text.includes("악재") || text.includes("급락") || text.includes("하한가") || text.includes("거래정지") || text.includes("고래매도")) return "bad";
-  return "event";
+
+function randInt(min, max) {
+  return Math.floor(rand(min, max + 1));
 }
 
-class Holding {
-  constructor(qty = 0, avg = 0) {
-    this.qty = qty;
-    this.avg = avg;
-  }
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v));
 }
 
-class Portfolio {
-  constructor() {
-    this.cash = START_CASH;
-    this.holdings = {};
-    this.realizedPnl = 0;
-    this.rescueCount = 0;
-  }
-
-  getHolding(sym) {
-    if (!this.holdings[sym]) this.holdings[sym] = new Holding();
-    return this.holdings[sym];
-  }
-
-  totalValue(prices) {
-    let v = this.cash;
-    for (const [sym, h] of Object.entries(this.holdings)) {
-      v += h.qty * (prices[sym] || 0);
-    }
-    return v;
-  }
-
-  unrealizedPnl(prices) {
-    let u = 0;
-    for (const [sym, h] of Object.entries(this.holdings)) {
-      if (h.qty <= 0) continue;
-      u += ((prices[sym] || 0) - h.avg) * h.qty;
-    }
-    return u;
-  }
-
-  totalInvested() {
-    return START_CASH + this.rescueCount * RESCUE_CASH;
-  }
-
-  totalReturnPct(prices) {
-    const invested = this.totalInvested();
-    if (!invested) return 0;
-    return ((this.totalValue(prices) - invested) / invested) * 100;
-  }
-
-  allocation(prices) {
-    const total = this.totalValue(prices);
-    if (total <= 0) return [];
-    const rows = [];
-    for (const [sym, h] of Object.entries(this.holdings)) {
-      if (h.qty <= 0) continue;
-      const value = h.qty * (prices[sym] || 0);
-      const pct = (value / total) * 100;
-      rows.push({ sym, value, pct });
-    }
-    rows.sort((a, b) => b.value - a.value);
-    return rows;
-  }
-
-  toJSON() {
-    return {
-      cash: this.cash,
-      holdings: this.holdings,
-      realizedPnl: this.realizedPnl,
-      rescueCount: this.rescueCount
-    };
-  }
-
-  static from(data) {
-    const pf = new Portfolio();
-    pf.cash = data.cash ?? START_CASH;
-    pf.realizedPnl = data.realizedPnl ?? 0;
-    pf.rescueCount = data.rescueCount ?? 0;
-    pf.holdings = {};
-    for (const [sym, v] of Object.entries(data.holdings || {})) {
-      pf.holdings[sym] = new Holding(v.qty || 0, v.avg || 0);
-    }
-    return pf;
-  }
+function formatKRW(v) {
+  return `${Math.round(v).toLocaleString("ko-KR")}원`;
 }
 
-class SymbolMarket {
-  constructor(meta) {
-    this.symbol = meta.symbol;
-    this.name = meta.name;
-    this.color = meta.color;
-    this.sector = meta.sector;
-    this.theme = meta.theme;
-    this.desc = meta.desc;
-
-    const base = randInt(10000, 300000);
-    this.price = base * rand(0.94, 1.06);
-    this.lastDeltaPct = 0;
-    this.news = null;
-
-    this.basePrice = this.price;
-    this.dayOpen = this.price;
-    this.dayHigh = this.price;
-    this.dayLow = this.price;
-    this.prevClose = this.price;
-    this.dayVolume = randInt(1000, 5000);
-
-    this.haltedUntilTick = 0;
-    this.limitState = "NORMAL";
-
-    this.history = [this.price];
-    this.tradeTape = [];
-    this.candles = [];
-    this.currentCandle = null;
-
-    this.investorToday = { personal: 0, foreign: 0, institute: 0 };
-    this.investorHistory = [];
-    this.seedInvestorHistory();
-    this.seedCandles();
-  }
-
-  seedInvestorHistory() {
-    this.investorHistory = [];
-    for (let i = 6; i >= 1; i--) {
-      const p = randInt(-18000000, 18000000);
-      const f = randInt(-16000000, 16000000);
-      const ins = -(p + f) + randInt(-1500000, 1500000);
-      this.investorHistory.unshift({
-        date: todayLabel(i),
-        personal: p,
-        foreign: f,
-        institute: ins
-      });
-    }
-  }
-
-  seedCandles() {
-    let p = this.price;
-    for (let i = 0; i < 40; i++) {
-      const o = p;
-      const c = clampPrice(o * (1 + rand(-0.03, 0.03)));
-      const h = Math.max(o, c) * (1 + rand(0.001, 0.02));
-      const l = Math.min(o, c) * (1 - rand(0.001, 0.02));
-      this.candles.push({
-        time: i,
-        open: o,
-        high: h,
-        low: l,
-        close: c,
-        volume: randInt(2000, 15000)
-      });
-      p = c;
-    }
-  }
-
-  resetDayBase() {
-    this.investorHistory.unshift({
-      date: todayLabel(0),
-      personal: this.investorToday.personal,
-      foreign: this.investorToday.foreign,
-      institute: this.investorToday.institute
-    });
-    this.investorHistory = this.investorHistory.slice(0, INVESTOR_HISTORY_LEN);
-
-    this.prevClose = this.price;
-    this.basePrice = this.price;
-    this.dayOpen = this.price;
-    this.dayHigh = this.price;
-    this.dayLow = this.price;
-    this.dayVolume = 0;
-    this.limitState = "NORMAL";
-    this.haltedUntilTick = 0;
-    this.tradeTape = [];
-    this.investorToday = { personal: 0, foreign: 0, institute: 0 };
-  }
-
-  limitUpPrice() {
-    return this.basePrice * (1 + LIMIT_UP_PCT);
-  }
-
-  limitDownPrice() {
-    return this.basePrice * (1 - LIMIT_DOWN_PCT);
-  }
-
-  isHalted(tick) {
-    return tick < this.haltedUntilTick;
-  }
-
-  activeNewsBias(tick) {
-    if (this.news && tick < this.news.untilTick) return this.news.bias;
-    return 0;
-  }
-
-  activeNewsText(tick) {
-    if (this.news && tick < this.news.untilTick) {
-      return `${this.news.title}: ${this.news.text} (남은 ${this.news.untilTick - tick}s)`;
-    }
-    return "없음";
-  }
-
-  maybeClearNews(tick) {
-    if (this.news && tick >= this.news.untilTick) this.news = null;
-  }
-
-  volatilityPct() {
-    const vals = this.history.slice(-20);
-    if (vals.length < 2) return 0;
-    const low = Math.min(...vals);
-    const high = Math.max(...vals);
-    return ((high - low) / Math.max(1, this.price)) * 100;
-  }
-
-  rollNews(tick) {
-    const good = Math.random() < 0.5;
-    const pool = good ? [
-      ["호재", "대형 계약 체결 소식 확산", 0.008, 0.020, 6, 14],
-      ["호재", "실적 상향 기대감 반영", 0.006, 0.018, 6, 12],
-      ["고래매수", "기관급 대량 매수 포착", 0.012, 0.035, 4, 9],
-      ["기술호재", "신규 서비스 기대감 상승", 0.006, 0.018, 6, 13],
-      ["실적", "분기 실적 서프라이즈", 0.010, 0.028, 6, 14],
-      ["확장", "해외 진출 소식 부각", 0.008, 0.020, 6, 12]
-    ] : [
-      ["악재", "규제 이슈 가능성 보도", -0.020, -0.008, 6, 14],
-      ["스캔들", "대표 관련 논란 발생", -0.028, -0.012, 5, 12],
-      ["고래매도", "대량 시장가 매도 출회", -0.040, -0.012, 4, 9],
-      ["장애", "서비스 장애로 신뢰 하락", -0.020, -0.008, 5, 10],
-      ["공매도", "매도 압력 급증", -0.024, -0.010, 6, 12],
-      ["실적", "실적 하향 우려 확산", -0.018, -0.007, 6, 12]
-    ];
-    const item = pool[randInt(0, pool.length - 1)];
-    this.news = {
-      title: item[0],
-      text: item[1],
-      bias: rand(item[2], item[3]),
-      untilTick: tick + randInt(item[4], item[5])
-    };
-  }
-
-  recordTradeTape(price, deltaPct) {
-    const qty = randInt(1, 999);
-    const side = deltaPct >= 0 ? "BUY" : "SELL";
-    this.tradeTape.unshift({ side, price, qty, rate: deltaPct * 100 });
-    this.tradeTape = this.tradeTape.slice(0, TAPE_LEN);
-  }
-
-  updateInvestors(deltaPct) {
-    const strength = Math.abs(deltaPct) * 10000000;
-    const personal = Math.round(randInt(-400000, 400000) + strength * (deltaPct >= 0 ? 1 : -0.5));
-    const foreign = Math.round(randInt(-350000, 350000) + strength * (deltaPct >= 0 ? -0.6 : 1.0));
-    const institute = Math.round(-(personal + foreign) + randInt(-120000, 120000));
-
-    this.investorToday.personal += personal;
-    this.investorToday.foreign += foreign;
-    this.investorToday.institute += institute;
-  }
-
-  updateCandle(tick) {
-    const candleTime = Math.floor(tick / TICKS_PER_CANDLE);
-    if (!this.currentCandle || this.currentCandle.time !== candleTime) {
-      if (this.currentCandle) this.candles.push(this.currentCandle);
-      this.currentCandle = {
-        time: candleTime,
-        open: this.price,
-        high: this.price,
-        low: this.price,
-        close: this.price,
-        volume: 0
-      };
-    }
-    this.currentCandle.high = Math.max(this.currentCandle.high, this.price);
-    this.currentCandle.low = Math.min(this.currentCandle.low, this.price);
-    this.currentCandle.close = this.price;
-    this.currentCandle.volume += randInt(80, 800);
-
-    this.candles = this.candles.slice(-CANDLE_LIMIT);
-  }
-
-  getCandleSeries() {
-    const out = [...this.candles];
-    if (this.currentCandle) out.push(this.currentCandle);
-    return out.slice(-CANDLE_LIMIT);
-  }
-
-  toJSON() {
-    return {
-      symbol: this.symbol,
-      name: this.name,
-      color: this.color,
-      sector: this.sector,
-      theme: this.theme,
-      desc: this.desc,
-      price: this.price,
-      lastDeltaPct: this.lastDeltaPct,
-      news: this.news,
-      basePrice: this.basePrice,
-      dayOpen: this.dayOpen,
-      dayHigh: this.dayHigh,
-      dayLow: this.dayLow,
-      prevClose: this.prevClose,
-      dayVolume: this.dayVolume,
-      haltedUntilTick: this.haltedUntilTick,
-      limitState: this.limitState,
-      history: this.history,
-      tradeTape: this.tradeTape,
-      investorToday: this.investorToday,
-      investorHistory: this.investorHistory,
-      candles: this.candles,
-      currentCandle: this.currentCandle
-    };
-  }
-
-  static from(data) {
-    const sm = new SymbolMarket(data);
-    Object.assign(sm, data);
-    return sm;
-  }
+function formatSignedKRW(v) {
+  const rounded = Math.round(v);
+  return `${rounded >= 0 ? "+" : ""}${rounded.toLocaleString("ko-KR")}원`;
 }
 
-class Market {
-  constructor() {
-    this.tick = 0;
-    this.regime = "CALM";
-    this.regimeUntil = 0;
-    this.lastDayReset = Date.now();
-
-    this.symbols = {};
-    for (const item of STOCK_CATALOG) this.symbols[item.symbol] = new SymbolMarket(item);
-
-    this.newsFeed = [];
-    this.eventFeed = [];
-  }
-
-  maybeSwitchRegime() {
-    if (this.tick < this.regimeUntil) return;
-    const r = Math.random();
-    if (this.regime === "CALM") {
-      this.regime = r < 0.12 ? "MANIA" : (r < 0.22 ? "CRASH" : "CALM");
-    } else if (this.regime === "MANIA") {
-      this.regime = r < 0.62 ? "CALM" : (r < 0.74 ? "CRASH" : "MANIA");
-    } else {
-      this.regime = r < 0.58 ? "CALM" : (r < 0.70 ? "MANIA" : "CRASH");
-    }
-    this.regimeUntil = this.tick + (this.regime === "CALM" ? randInt(18, 45) : randInt(12, 28));
-  }
-
-  maybeResetDay() {
-    if (Date.now() - this.lastDayReset >= 24 * 60 * 60 * 1000) {
-      this.lastDayReset = Date.now();
-      Object.values(this.symbols).forEach(sm => sm.resetDayBase());
-    }
-  }
-
-  rowsSorted() {
-    const rows = Object.values(this.symbols).map(sm => ({
-      sym: sm.symbol,
-      name: sm.name,
-      price: sm.price,
-      delta: sm.lastDeltaPct * 100,
-      halted: sm.isHalted(this.tick),
-      limitState: sm.limitState,
-      history: sm.history.slice(-18),
-      volume: sm.dayVolume,
-      volatility: sm.volatilityPct(),
-      sector: sm.sector,
-      theme: sm.theme,
-      desc: sm.desc,
-      prevClose: sm.prevClose,
-      limitUp: sm.limitUpPrice(),
-      limitDown: sm.limitDownPrice(),
-      color: sm.color
-    }));
-    rows.sort((a, b) => b.delta - a.delta);
-    return rows;
-  }
-
-  step() {
-    this.tick += 1;
-    this.maybeResetDay();
-    this.maybeSwitchRegime();
-
-    const cfg = REGIMES[this.regime];
-    const moveAmp = cfg.move;
-    const regimeBias = cfg.bias;
-    const eventMul = cfg.eventMul;
-
-    for (const sm of Object.values(this.symbols)) {
-      sm.maybeClearNews(this.tick);
-
-      if (!sm.news && Math.random() < NEWS_CHANCE_PER_TICK * eventMul) {
-        sm.rollNews(this.tick);
-        this.newsFeed.unshift(`📰 ${sm.name} — ${sm.news.title}: ${sm.news.text}`);
-        this.newsFeed = this.newsFeed.slice(0, 6);
-      }
-
-      if (sm.isHalted(this.tick)) {
-        sm.lastDeltaPct = 0;
-        sm.history.push(sm.price);
-        sm.history = sm.history.slice(-HISTORY_LEN);
-        sm.dayVolume += randInt(0, 5);
-        sm.updateCandle(this.tick);
-        continue;
-      }
-
-      let didShock = false;
-      let move;
-      if (Math.random() < SHOCK_CHANCE_PER_TICK * eventMul) {
-        const sign = Math.random() < 0.5 ? 1 : -1;
-        const shock = rand(SHOCK_MIN, SHOCK_MAX) * sign;
-        move = shock + regimeBias + sm.activeNewsBias(this.tick);
-        didShock = true;
-      } else {
-        move = rand(-moveAmp, moveAmp) + regimeBias + sm.activeNewsBias(this.tick);
-      }
-
-      sm.lastDeltaPct = move;
-      let newPrice = clampPrice(sm.price * (1 + move));
-
-      const up = sm.limitUpPrice();
-      const dn = sm.limitDownPrice();
-
-      if (newPrice >= up) {
-        sm.price = up;
-        sm.limitState = "UP";
-        sm.haltedUntilTick = this.tick + HALT_TICKS;
-        this.eventFeed.unshift(`🟥 ${sm.name} 상한가 진입`);
-      } else if (newPrice <= dn) {
-        sm.price = dn;
-        sm.limitState = "DOWN";
-        sm.haltedUntilTick = this.tick + HALT_TICKS;
-        this.eventFeed.unshift(`🟦 ${sm.name} 하한가 진입`);
-      } else {
-        sm.price = newPrice;
-        sm.limitState = "NORMAL";
-      }
-
-      this.eventFeed = this.eventFeed.slice(0, 6);
-
-      sm.dayHigh = Math.max(sm.dayHigh, sm.price);
-      sm.dayLow = Math.min(sm.dayLow, sm.price);
-      sm.dayVolume += randInt(40, 650);
-      sm.history.push(sm.price);
-      sm.history = sm.history.slice(-HISTORY_LEN);
-
-      sm.recordTradeTape(sm.price, move);
-      sm.updateInvestors(move);
-      sm.updateCandle(this.tick);
-
-      if (didShock && Math.abs(move * 100) >= 8) {
-        this.eventFeed.unshift(`${move >= 0 ? "🔴 급등" : "🔵 급락"} ${sm.name} ${fmtPct(move * 100)}`);
-        this.eventFeed = this.eventFeed.slice(0, 6);
-      }
-    }
-  }
-
-  toJSON() {
-    const symbols = {};
-    for (const [k, v] of Object.entries(this.symbols)) symbols[k] = v.toJSON();
-    return {
-      tick: this.tick,
-      regime: this.regime,
-      regimeUntil: this.regimeUntil,
-      lastDayReset: this.lastDayReset,
-      symbols,
-      newsFeed: this.newsFeed,
-      eventFeed: this.eventFeed
-    };
-  }
-
-  static from(data) {
-    const m = new Market();
-    m.tick = data.tick ?? 0;
-    m.regime = data.regime ?? "CALM";
-    m.regimeUntil = data.regimeUntil ?? 0;
-    m.lastDayReset = data.lastDayReset ?? Date.now();
-    m.newsFeed = data.newsFeed || [];
-    m.eventFeed = data.eventFeed || [];
-    m.symbols = {};
-    for (const [k, v] of Object.entries(data.symbols || {})) {
-      m.symbols[k] = SymbolMarket.from(v);
-    }
-    return m;
-  }
+function formatSignedPct(v) {
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 }
 
-class Rival {
-  constructor(name) {
-    this.name = name;
-    this.portfolio = new Portfolio();
-    this.portfolio.cash = randInt(800000, 1400000);
-    this.style = randInt(1, 3);
-  }
-
-  step(market) {
-    const prices = currentPrices(market);
-    const symbols = Object.keys(market.symbols);
-    const pick = symbols[randInt(0, symbols.length - 1)];
-    const sm = market.symbols[pick];
-    const h = this.portfolio.getHolding(pick);
-
-    if (sm.isHalted(market.tick)) return;
-
-    const aggressiveness = this.style === 1 ? 0.42 : this.style === 2 ? 0.55 : 0.68;
-    const willBuy = Math.random() < aggressiveness;
-
-    if (willBuy) {
-      const xprice = execPrice(sm.price, "BUY");
-      const maxQty = Math.floor(this.portfolio.cash / (xprice * (1 + FEE_RATE)));
-      if (maxQty > 0) {
-        const qty = randInt(1, Math.max(1, Math.min(maxQty, this.style * 5)));
-        const cost = xprice * qty;
-        const f = fee(cost);
-        const total = cost + f;
-        if (total <= this.portfolio.cash) {
-          const newQty = h.qty + qty;
-          h.avg = ((h.avg * h.qty) + xprice * qty) / newQty;
-          h.qty = newQty;
-          this.portfolio.cash -= total;
-        }
-      }
-    } else {
-      if (h.qty > 0) {
-        const qty = randInt(1, Math.max(1, Math.min(h.qty, this.style * 4)));
-        const xprice = execPrice(sm.price, "SELL");
-        const proceeds = xprice * qty;
-        const f = fee(proceeds);
-        const realized = (xprice - h.avg) * qty - f;
-        this.portfolio.realizedPnl += realized;
-        this.portfolio.cash += proceeds - f;
-        h.qty -= qty;
-        if (h.qty === 0) h.avg = 0;
-      }
-    }
-
-    if (Math.random() < 0.02) {
-      this.portfolio.cash += randInt(20000, 100000);
-    }
-
-    prices;
-  }
-
-  toJSON() {
-    return {
-      name: this.name,
-      portfolio: this.portfolio.toJSON(),
-      style: this.style
-    };
-  }
-
-  static from(data) {
-    const r = new Rival(data.name);
-    r.portfolio = Portfolio.from(data.portfolio || {});
-    r.style = data.style || 1;
-    return r;
-  }
+function formatVolume(v) {
+  if (v >= 100000000) return `${(v / 100000000).toFixed(2)}억`;
+  if (v >= 10000) return `${(v / 10000).toFixed(1)}만`;
+  return Math.round(v).toLocaleString("ko-KR");
 }
 
-const app = {
-  market: null,
-  myPortfolio: null,
-  rivals: [],
-  selectedSymbol: STOCK_CATALOG[0].symbol,
-  running: true,
-  timerId: null,
-  tradeMode: "BUY",
-  tickMs: 1000,
-  speedIndex: 0,
-  chartHoverIndex: null
-};
-
-function currentPrices(market) {
-  const out = {};
-  for (const [k, v] of Object.entries(market.symbols)) out[k] = v.price;
-  return out;
+function nowTime() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
 }
 
 function saveState() {
   const data = {
-    market: app.market.toJSON(),
-    myPortfolio: app.myPortfolio.toJSON(),
-    rivals: app.rivals.map(r => r.toJSON()),
-    selectedSymbol: app.selectedSymbol,
-    tickMs: app.tickMs,
-    speedIndex: app.speedIndex
+    speed: state.speed,
+    selectedCode: state.selectedCode,
+    orderMode: state.orderMode,
+    sortBy: state.sortBy,
+    favorites: state.favorites,
+    portfolio: state.portfolio,
+    news: state.news.slice(0, NEWS_LIMIT),
+    alerts: state.alerts.slice(0, ALERT_LIMIT),
+    orderHistory: state.orderHistory.slice(0, ORDER_LIMIT),
+    stocks: state.stocks.map(s => ({
+      code: s.code,
+      name: s.name,
+      logo: s.logo,
+      theme: s.theme,
+      shares: s.shares,
+      candles: s.candles,
+      orderbook: s.orderbook,
+      prevClose: s.prevClose,
+      volatility: s.volatility,
+      turnoverBoost: s.turnoverBoost
+    }))
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
@@ -733,787 +154,1016 @@ function loadState() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return false;
   try {
-    const data = JSON.parse(raw);
-    app.market = Market.from(data.market || {});
-    app.myPortfolio = Portfolio.from(data.myPortfolio || {});
-    app.rivals = (data.rivals || []).map(x => Rival.from(x));
-    app.selectedSymbol = data.selectedSymbol || STOCK_CATALOG[0].symbol;
-    app.tickMs = data.tickMs || 1000;
-    app.speedIndex = data.speedIndex || 0;
-    return true;
+    const saved = JSON.parse(raw);
+    state.speed = saved.speed || 1;
+    state.selectedCode = saved.selectedCode || "KQ001";
+    state.orderMode = saved.orderMode || "buy";
+    state.sortBy = saved.sortBy || "change";
+    state.favorites = Array.isArray(saved.favorites) ? saved.favorites : [];
+    state.portfolio = saved.portfolio || { cash: 10000000, holdings: {} };
+    state.news = Array.isArray(saved.news) ? saved.news : [];
+    state.alerts = Array.isArray(saved.alerts) ? saved.alerts : [];
+    state.orderHistory = Array.isArray(saved.orderHistory) ? saved.orderHistory : [];
+
+    if (Array.isArray(saved.stocks) && saved.stocks.length) {
+      state.stocks = saved.stocks.map(s => ({
+        ...s,
+        currentPrice: s.candles[s.candles.length - 1].close,
+        currentVolume: s.candles[s.candles.length - 1].volume,
+        dayHigh: Math.max(...s.candles.map(c => c.high)),
+        dayLow: Math.min(...s.candles.map(c => c.low)),
+        mood: 50 + randInt(-10, 10),
+        flashDirection: 0
+      }));
+      return true;
+    }
   } catch (e) {
     console.error(e);
-    return false;
   }
+  return false;
 }
 
-function createFreshState() {
-  app.market = new Market();
-  app.myPortfolio = new Portfolio();
-  app.rivals = RIVAL_NAMES.map(name => new Rival(name));
-  app.selectedSymbol = STOCK_CATALOG[0].symbol;
-  app.tickMs = SPEED_MODES[0];
-  app.speedIndex = 0;
-}
+function buildInitialStocks() {
+  state.stocks = STOCK_SEED.map(seed => {
+    const candles = [];
+    let prev = seed.base * rand(0.92, 1.08);
+    const startPrevClose = prev;
 
-function showToast(message, type = "info") {
-  const wrap = $("#toastWrap");
-  const div = document.createElement("div");
-  div.className = `toast ${type}`;
-  div.textContent = message;
-  wrap.appendChild(div);
-  setTimeout(() => div.remove(), 2600);
-}
+    for (let i = 0; i < 120; i++) {
+      const open = prev;
+      const move = rand(-0.022, 0.024) * (1 + i / 420);
+      const close = Math.max(700, open * (1 + move));
+      const high = Math.max(open, close) * (1 + rand(0.001, 0.018));
+      const low = Math.min(open, close) * (1 - rand(0.001, 0.018));
+      const volume = randInt(8000, 200000) * (1 + Math.abs(move) * 25);
+      candles.push({
+        time: `T-${120 - i}`,
+        open,
+        high,
+        low,
+        close,
+        volume
+      });
+      prev = close;
+    }
 
-function openModal(mode) {
-  app.tradeMode = mode;
-  const sym = app.selectedSymbol;
-  const sm = app.market.symbols[sym];
-  const h = app.myPortfolio.getHolding(sym);
-  const xprice = execPrice(sm.price, mode);
-  const maxQty = mode === "BUY"
-    ? Math.max(0, Math.floor(app.myPortfolio.cash / (xprice * (1 + FEE_RATE))))
-    : h.qty;
-
-  $("#modalTitle").textContent = `${mode === "BUY" ? "매수" : "매도"} · ${sm.name}`;
-  $("#modalDesc").textContent =
-    `${mode === "BUY" ? "예상 매수 체결가" : "예상 매도 체결가"} ${fmtWon(xprice)} · ` +
-    `${mode === "BUY" ? `최대 ${maxQty}주 매수 가능` : `보유 ${h.qty}주`}`;
-
-  $("#tradeQtyInput").value = "";
-  $("#tradeQtyInput").setAttribute("max", maxQty);
-  $("#tradeModal").classList.remove("hidden");
-}
-function closeModal() {
-  $("#tradeModal").classList.add("hidden");
-}
-
-function openDetailModal(sym) {
-  const sm = app.market.symbols[sym];
-  const d = sm.lastDeltaPct * 100;
-  const halted = sm.isHalted(app.market.tick);
-  const cls = moveClass(d, halted, sm.limitState);
-  const candles = sm.getCandleSeries().slice(-6);
-  const ma5 = calcMA(sm.getCandleSeries(), 5).at(-1);
-  const ma20 = calcMA(sm.getCandleSeries(), 20).at(-1);
-  const ma60 = calcMA(sm.getCandleSeries(), 60).at(-1);
-
-  $("#detailTitle").textContent = `${sm.name} (${sm.symbol})`;
-  $("#detailPrice").textContent = fmtWon(sm.price);
-  $("#detailChange").textContent = `${fmtPct(d)} · ${trendWord(d, halted, sm.limitState)}`;
-  $("#detailChange").className = `detail-change ${cls}`;
-
-  const state = $("#detailState");
-  state.textContent = trendWord(d, halted, sm.limitState);
-  state.className = `selected-state ${cls}`;
-
-  $("#detailInfo").innerHTML =
-    `업종 <strong>${sm.sector}</strong><br>` +
-    `테마 <strong>${sm.theme}</strong><br>` +
-    `${sm.desc}`;
-
-  $("#detailPriceInfo").innerHTML =
-    `전일 종가 <strong>${fmtWon(sm.prevClose)}</strong><br>` +
-    `시가 ${fmtWon(sm.dayOpen)}<br>` +
-    `고가 ${fmtWon(sm.dayHigh)}<br>` +
-    `저가 ${fmtWon(sm.dayLow)}<br>` +
-    `상한가 ${fmtWon(sm.limitUpPrice())}<br>` +
-    `하한가 ${fmtWon(sm.limitDownPrice())}<br>` +
-    `거래량 ${fmtNum(sm.dayVolume)}주`;
-
-  $("#detailNews").innerHTML =
-    sm.activeNewsText(app.market.tick) === "없음"
-      ? `현재 활성 뉴스 없음<br><br>최근 시장 이벤트를 참고하면 됨`
-      : sm.activeNewsText(app.market.tick).replace(/\n/g, "<br>");
-
-  $("#detailTech").innerHTML =
-    `변동성 <strong>${sm.volatilityPct().toFixed(2)}%</strong><br>` +
-    `MA5 ${ma5 ? fmtWon(ma5) : "-"}<br>` +
-    `MA20 ${ma20 ? fmtWon(ma20) : "-"}<br>` +
-    `MA60 ${ma60 ? fmtWon(ma60) : "-"}<br>` +
-    `스파크라인 ${sparkline(sm.history.slice(-24))}`;
-
-  const candleBox = $("#detailCandles");
-  candleBox.innerHTML = "";
-  candles.forEach((c, idx) => {
-    const div = document.createElement("div");
-    div.className = "candle-mini";
-    div.innerHTML =
-      `<strong>${idx + 1}번째 최근봉</strong><br>` +
-      `시가 ${fmtWon(c.open)}<br>` +
-      `고가 ${fmtWon(c.high)}<br>` +
-      `저가 ${fmtWon(c.low)}<br>` +
-      `종가 ${fmtWon(c.close)}<br>` +
-      `거래량 ${fmtNum(c.volume)}`;
-    candleBox.appendChild(div);
+    const currentPrice = candles[candles.length - 1].close;
+    return {
+      code: seed.code,
+      name: seed.name,
+      logo: seed.logo,
+      theme: seed.theme,
+      shares: seed.shares,
+      candles,
+      currentPrice,
+      currentVolume: candles[candles.length - 1].volume,
+      prevClose: startPrevClose,
+      dayHigh: Math.max(...candles.map(c => c.high)),
+      dayLow: Math.min(...candles.map(c => c.low)),
+      volatility: rand(0.7, 1.6),
+      turnoverBoost: rand(0.9, 1.4),
+      mood: randInt(35, 65),
+      flashDirection: 0,
+      orderbook: []
+    };
   });
 
-  $("#detailModal").classList.remove("hidden");
-}
-
-function closeDetailModal() {
-  $("#detailModal").classList.add("hidden");
-}
-
-function executeTrade(side, qty) {
-  const market = app.market;
-  const sym = app.selectedSymbol;
-  const sm = market.symbols[sym];
-  const pf = app.myPortfolio;
-  const h = pf.getHolding(sym);
-
-  if (!Number.isInteger(qty) || qty <= 0) {
-    showToast("수량은 1 이상 정수여야 함", "error");
-    return false;
-  }
-  if (sm.isHalted(market.tick)) {
-    showToast("거래정지 상태라 거래할 수 없음", "error");
-    return false;
-  }
-
-  if (side === "BUY") {
-    const xprice = execPrice(sm.price, "BUY");
-    const maxQty = Math.floor(pf.cash / (xprice * (1 + FEE_RATE)));
-    if (qty > maxQty) {
-      showToast(`최대 ${maxQty}주까지 매수 가능`, "error");
-      return false;
-    }
-    const cost = xprice * qty;
-    const f = fee(cost);
-    const total = cost + f;
-    const newQty = h.qty + qty;
-    h.avg = ((h.avg * h.qty) + (xprice * qty)) / newQty;
-    h.qty = newQty;
-    pf.cash -= total;
-    showToast(`매수 완료 · ${sm.name} ${qty}주`, "success");
-  } else {
-    if (qty > h.qty) {
-      showToast(`보유 수량 부족 · 현재 ${h.qty}주`, "error");
-      return false;
-    }
-    const xprice = execPrice(sm.price, "SELL");
-    const proceeds = xprice * qty;
-    const f = fee(proceeds);
-    const realized = (xprice - h.avg) * qty - f;
-    pf.realizedPnl += realized;
-    pf.cash += proceeds - f;
-    h.qty -= qty;
-    if (h.qty === 0) h.avg = 0;
-    showToast(`매도 완료 · ${sm.name} ${qty}주`, "success");
-  }
-
-  saveState();
-  renderAll();
-  return true;
-}
-
-function renderHeadlines() {
-  const rows = [
-    ...app.market.newsFeed.slice(0, 3),
-    ...app.market.eventFeed.slice(0, 3)
-  ];
-
-  $("#headlineTicker").textContent = rows[0] || "📰 현재 표시할 속보가 없음";
-
-  const cards = $("#headlineCards");
-  cards.innerHTML = "";
-  (rows.length ? rows : ["📰 현재 표시할 속보가 없음"]).slice(0, 4).forEach(text => {
-    const div = document.createElement("div");
-    div.className = "headline-card";
-    div.innerHTML = `
-      <div class="tag ${newsTagType(text)}">${newsTagType(text) === "good" ? "호재" : newsTagType(text) === "bad" ? "주의" : "이벤트"}</div>
-      <div class="title">${text}</div>
-    `;
-    cards.appendChild(div);
+  state.stocks.forEach(s => {
+    s.orderbook = generateOrderbook(s);
   });
-
-  $("#tickValue").textContent = app.market.tick;
-  $("#marketStatusText").textContent = app.running ? "실행 중" : "정지됨";
-
-  const mood = REGIMES[app.market.regime];
-  const badge = $("#marketMoodBadge");
-  badge.textContent = `${mood.label} · ${mood.mood}`;
-  badge.className = `mood-badge ${mood.cls}`;
 }
 
-function buildRankingRows() {
-  const prices = currentPrices(app.market);
-  const rows = [{
-    name: "나",
-    total: app.myPortfolio.totalValue(prices),
-    summary: myHoldingSummary(),
-    isMe: true
-  }];
-
-  app.rivals.forEach(r => {
+function generateOrderbook(stock) {
+  const rows = [];
+  const base = stock.currentPrice;
+  for (let i = 10; i >= 1; i--) {
+    const price = Math.max(100, Math.round(base * (1 + i * 0.0022)));
     rows.push({
-      name: r.name,
-      total: r.portfolio.totalValue(prices),
-      summary: rivalHoldingSummary(r, prices),
-      isMe: false
+      side: "ask",
+      price,
+      qty: randInt(40, 900),
+      flash: 0
     });
-  });
-
-  rows.sort((a, b) => b.total - a.total);
+  }
+  for (let i = 1; i <= 10; i++) {
+    const price = Math.max(100, Math.round(base * (1 - i * 0.0022)));
+    rows.push({
+      side: "bid",
+      price,
+      qty: randInt(40, 900),
+      flash: 0
+    });
+  }
   return rows;
 }
 
-function myHoldingSummary() {
-  const prices = currentPrices(app.market);
-  const items = [];
-  for (const [sym, h] of Object.entries(app.myPortfolio.holdings)) {
-    if (h.qty > 0) items.push({ sym, qty: h.qty, value: h.qty * (prices[sym] || 0) });
-  }
-  items.sort((a, b) => b.value - a.value);
-  if (!items.length) return "보유 주식 없음";
-  const top = app.market.symbols[items[0].sym];
-  return items.length === 1
-    ? `${top.name} ${items[0].qty}주`
-    : `${top.name} ${items[0].qty}주 외 ${items.length - 1}종목`;
+function getSelectedStock() {
+  return state.stocks.find(s => s.code === state.selectedCode) || state.stocks[0];
 }
 
-function rivalHoldingSummary(rival, prices) {
-  const items = [];
-  for (const [sym, h] of Object.entries(rival.portfolio.holdings)) {
-    if (h.qty > 0) items.push({ sym, qty: h.qty, value: h.qty * (prices[sym] || 0) });
-  }
-  items.sort((a, b) => b.value - a.value);
-  if (!items.length) return "보유 주식 없음";
-  const top = app.market.symbols[items[0].sym];
-  return items.length === 1
-    ? `${top.name} ${items[0].qty}주`
-    : `${top.name} ${items[0].qty}주 외 ${items.length - 1}종목`;
+function getHolding(code) {
+  return state.portfolio.holdings[code] || { qty: 0, avgPrice: 0 };
 }
 
-function renderRanking() {
-  const wrap = $("#rankingList");
-  wrap.innerHTML = "";
+function getStockRate(stock) {
+  return ((stock.currentPrice - stock.prevClose) / stock.prevClose) * 100;
+}
 
-  const rows = buildRankingRows();
-  rows.forEach((row, idx) => {
-    const badge = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `${idx + 1}위`;
-    const card = document.createElement("div");
-    card.className = "rank-card";
-    card.innerHTML = `
-      <div class="rank-left">
-        <div class="rank-badge">${badge}</div>
-        <div>
-          <div class="rank-name">${row.name}${row.isMe ? " 👈" : ""}</div>
-          <div class="rank-sub">${row.summary}</div>
-        </div>
-      </div>
-      <div class="rank-right">
-        <div class="rank-asset">${fmtWon(row.total)}</div>
-        <div class="rank-tag">${row.isMe ? "내 총자산" : "라이벌 총자산"}</div>
-      </div>
-    `;
-    wrap.appendChild(card);
+function getStockValueOfHolding(code) {
+  const stock = state.stocks.find(s => s.code === code);
+  const holding = getHolding(code);
+  if (!stock) return 0;
+  return stock.currentPrice * holding.qty;
+}
+
+function getInvestedAmount() {
+  return Object.entries(state.portfolio.holdings).reduce((sum, [code, h]) => {
+    return sum + (h.avgPrice * h.qty);
+  }, 0);
+}
+
+function getStockEvaluation() {
+  return Object.keys(state.portfolio.holdings).reduce((sum, code) => {
+    return sum + getStockValueOfHolding(code);
+  }, 0);
+}
+
+function getTotalAsset() {
+  return state.portfolio.cash + getStockEvaluation();
+}
+
+function getProfitLoss() {
+  return getTotalAsset() - (10000000);
+}
+
+function getProfitRate() {
+  return ((getTotalAsset() - 10000000) / 10000000) * 100;
+}
+
+function addNews(type, stock, title, desc) {
+  state.news.unshift({
+    id: `${Date.now()}_${Math.random()}`,
+    type,
+    code: stock.code,
+    name: stock.name,
+    title,
+    desc,
+    time: nowTime()
   });
+  state.news = state.news.slice(0, NEWS_LIMIT);
 }
 
-function renderStocks() {
-  const grid = $("#stockGrid");
-  grid.innerHTML = "";
-
-  const rows = app.market.rowsSorted();
-  rows.forEach(row => {
-    const cls = moveClass(row.delta, row.halted, row.limitState);
-    const card = document.createElement("div");
-    card.className = "stock-card";
-    card.style.setProperty("--accent", row.color);
-    card.innerHTML = `
-      <div class="stock-card-top">
-        <div>
-          <div class="stock-name">${row.name}</div>
-          <div class="stock-symbol">${row.sym} · ${row.sector} · ${row.theme}</div>
-        </div>
-        <div class="${cls}" style="font-weight:800;">${trendWord(row.delta, row.halted, row.limitState)}</div>
-      </div>
-      <div class="stock-price">${fmtWon(row.price)}</div>
-      <div class="stock-delta ${cls}">${fmtPct(row.delta)}</div>
-      <div class="stock-meta">
-        거래량 ${fmtNum(row.volume)}주 · 변동성 ${row.volatility.toFixed(2)}%<br>
-        전일 ${fmtWon(row.prevClose)} · 상한 ${fmtWon(row.limitUp)} · 하한 ${fmtWon(row.limitDown)}<br>
-        ${row.desc}
-      </div>
-      <div class="stock-spark">${sparkline(row.history)}</div>
-      <div class="stock-actions">
-        <button class="tiny-btn detail-open-btn" data-sym="${row.sym}">상세보기</button>
-        <button class="tiny-btn pick-btn" data-sym="${row.sym}">선택</button>
-      </div>
-    `;
-    grid.appendChild(card);
+function addAlert(message, stock, level = "alert") {
+  state.alerts.unshift({
+    id: `${Date.now()}_${Math.random()}`,
+    message,
+    code: stock ? stock.code : "",
+    name: stock ? stock.name : "",
+    time: nowTime(),
+    level
   });
+  state.alerts = state.alerts.slice(0, ALERT_LIMIT);
+  state.alertCount += 1;
+  state.marketAlertCount += 1;
+}
 
-  grid.querySelectorAll(".detail-open-btn").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      openDetailModal(e.currentTarget.dataset.sym);
+function addOrderHistory(type, stock, qty, price, amount, note) {
+  state.orderHistory.unshift({
+    id: `${Date.now()}_${Math.random()}`,
+    type,
+    code: stock.code,
+    name: stock.name,
+    qty,
+    price,
+    amount,
+    note,
+    time: nowTime()
+  });
+  state.orderHistory = state.orderHistory.slice(0, ORDER_LIMIT);
+}
+
+function createRandomNews(stock) {
+  const pool = [
+    { type: "breaking", templates: breakingTemplates },
+    { type: "good", templates: goodTemplates },
+    { type: "warn", templates: warnTemplates },
+    { type: "event", templates: eventTemplates }
+  ];
+  const picked = pool[randInt(0, pool.length - 1)];
+  const raw = picked.templates[randInt(0, picked.templates.length - 1)];
+  const title = raw.replace("{name}", stock.name);
+  const desc = `${stock.name} · ${stock.theme} 관련 흐름 속에서 현재 ${formatSignedPct(getStockRate(stock))} 변동 중. 체결 강도와 거래량 변화를 주시할 필요가 있다.`;
+  addNews(picked.type, stock, title, desc);
+  addAlert(`${stock.name} 관련 ${typeLabel(picked.type)} 발생`, stock, "alert");
+}
+
+function typeLabel(type) {
+  if (type === "breaking") return "속보";
+  if (type === "good") return "호재";
+  if (type === "warn") return "주의";
+  return "이벤트";
+}
+
+function maybeGenerateBurstNews(stock, tickFactor) {
+  const baseChance = 0.015 * tickFactor;
+  const extraChance = Math.abs(getStockRate(stock)) > 8 ? 0.025 * tickFactor : 0;
+  const volumeChance = stock.currentVolume > 250000 ? 0.012 * tickFactor : 0;
+  const chance = baseChance + extraChance + volumeChance;
+
+  if (Math.random() < chance) {
+    createRandomNews(stock);
+  }
+}
+
+function simulateTick() {
+  const loops = state.speed;
+  for (let loop = 0; loop < loops; loop++) {
+    state.stocks.forEach(stock => {
+      const last = stock.candles[stock.candles.length - 1];
+      const rate = getStockRate(stock);
+      let drift = 0;
+
+      if (rate > 22) drift -= rand(0.002, 0.007);
+      if (rate < -18) drift += rand(0.002, 0.007);
+
+      const sentimentBoost = (stock.mood - 50) / 10000;
+      const move = (rand(-0.018, 0.018) * stock.volatility) + drift + sentimentBoost;
+      const open = last.close;
+      let close = open * (1 + move);
+      close = Math.max(500, close);
+
+      const upperLimit = stock.prevClose * 1.30;
+      const lowerLimit = stock.prevClose * 0.70;
+      close = clamp(close, lowerLimit, upperLimit);
+
+      const high = Math.max(open, close) * (1 + rand(0.0005, 0.015));
+      const low = Math.min(open, close) * (1 - rand(0.0005, 0.015));
+      const volume = randInt(12000, 280000) * stock.turnoverBoost * (1 + Math.abs(move) * 30);
+
+      stock.candles.push({
+        time: `${Date.now()}`,
+        open,
+        high,
+        low,
+        close,
+        volume
+      });
+
+      if (stock.candles.length > 180) {
+        stock.candles.shift();
+      }
+
+      const beforePrice = stock.currentPrice;
+      stock.currentPrice = close;
+      stock.currentVolume = volume;
+      stock.dayHigh = Math.max(stock.dayHigh, high);
+      stock.dayLow = Math.min(stock.dayLow, low);
+      stock.flashDirection = close > beforePrice ? 1 : close < beforePrice ? -1 : 0;
+      stock.mood = clamp(stock.mood + randInt(-2, 2) + (close > open ? 1 : -1), 0, 100);
+
+      updateOrderbook(stock);
+      maybeGenerateLimitEvents(stock);
+      maybeGenerateBurstNews(stock, state.speed >= 20 ? 2.3 : state.speed >= 10 ? 1.6 : 1);
     });
-  });
-
-  grid.querySelectorAll(".pick-btn").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      const sym = e.currentTarget.dataset.sym;
-      app.selectedSymbol = sym;
-      $("#symbolSelect").value = sym;
-      saveState();
-      renderSelectedPanel();
-      showToast(`${app.market.symbols[sym].name} 선택됨`, "info");
-    });
-  });
-}
-
-function renderAccountSummary() {
-  const prices = currentPrices(app.market);
-  const total = app.myPortfolio.totalValue(prices);
-  const unreal = app.myPortfolio.unrealizedPnl(prices);
-  const realized = app.myPortfolio.realizedPnl;
-  const pnl = unreal + realized;
-  const ret = app.myPortfolio.totalReturnPct(prices);
-
-  $("#myTotalAssets").textContent = fmtWon(total);
-
-  const retEl = $("#myReturnPct");
-  retEl.textContent = fmtPct(ret);
-  retEl.className = ret > 0 ? "up" : ret < 0 ? "down" : "neutral";
-
-  const pnlEl = $("#myTotalPnl");
-  pnlEl.textContent = fmtSignedWon(pnl);
-  pnlEl.className = pnl > 0 ? "up" : pnl < 0 ? "down" : "neutral";
-
-  $("#myCash").textContent = fmtWon(app.myPortfolio.cash);
-  $("#myRealized").textContent = fmtSignedWon(realized);
-  $("#myUnrealized").textContent = fmtSignedWon(unreal);
-  $("#myRescue").textContent = `${app.myPortfolio.rescueCount}회`;
-}
-
-function formatOrderbook(price) {
-  const sell = [];
-  const buy = [];
-  for (let i = 5; i >= 1; i--) sell.push({ p: price * (1 + i * 0.0025), q: randInt(1000, 45000) });
-  for (let i = 1; i <= 5; i++) buy.push({ p: price * (1 - i * 0.0025), q: randInt(1000, 45000) });
-
-  let lines = [];
-  lines.push("매도호가");
-  sell.forEach(x => lines.push(`🔴 ${String(Math.round(x.p)).padStart(8)} | ${String(x.q).padStart(6)}`));
-  lines.push("----------------------");
-  lines.push(`⚪ ${String(Math.round(price)).padStart(8)} | 현재가`);
-  lines.push("----------------------");
-  buy.forEach(x => lines.push(`🔵 ${String(Math.round(x.p)).padStart(8)} | ${String(x.q).padStart(6)}`));
-  lines.push("매수호가");
-  return lines.join("\n");
-}
-
-function formatTradeTape(tape) {
-  if (!tape.length) return "체결 내역 없음";
-  let lines = [];
-  lines.push("체결가      수량   등락률");
-  tape.slice(0, 8).forEach(t => {
-    lines.push(`${String(Math.round(t.price)).padStart(8)}  ${String(t.qty).padStart(4)}  ${fmtPct(t.rate).padStart(8)}`);
-  });
-  return lines.join("\n");
-}
-
-function formatInvestorSummary(sm) {
-  const bar = (v) => {
-    const mag = Math.min(12, Math.max(0, Math.floor(Math.abs(v) / 300000)));
-    return mag > 0 ? "█".repeat(mag) : "▏";
-  };
-  return [
-    "투자자 동향",
-    `개인   ${fmtSignedNum(sm.investorToday.personal).padStart(12)}  ${bar(sm.investorToday.personal)}`,
-    `외국인 ${fmtSignedNum(sm.investorToday.foreign).padStart(12)}  ${bar(sm.investorToday.foreign)}`,
-    `기관   ${fmtSignedNum(sm.investorToday.institute).padStart(12)}  ${bar(sm.investorToday.institute)}`,
-    "",
-    "날짜      개인        외국인      기관",
-    ...sm.investorHistory.slice(0, 6).map(r =>
-      `${r.date} ${fmtSignedNum(r.personal).padStart(10)} ${fmtSignedNum(r.foreign).padStart(10)} ${fmtSignedNum(r.institute).padStart(10)}`
-    )
-  ].join("\n");
-}
-
-function renderAllocation() {
-  const wrap = $("#allocationBox");
-  wrap.innerHTML = "";
-  const prices = currentPrices(app.market);
-  const alloc = app.myPortfolio.allocation(prices);
-  if (!alloc.length) {
-    wrap.innerHTML = `<div class="desc-box">아직 보유한 종목이 없음</div>`;
-    return;
   }
 
-  alloc.slice(0, 5).forEach(row => {
-    const sm = app.market.symbols[row.sym];
-    const div = document.createElement("div");
-    div.className = "alloc-row";
-    div.innerHTML = `
-      <div class="alloc-head">
-        <span>${sm.name}</span>
-        <span>${fmtWon(row.value)} · ${row.pct.toFixed(1)}%</span>
-      </div>
-      <div class="alloc-bar">
-        <div class="alloc-fill" style="width:${Math.min(100, row.pct)}%"></div>
-      </div>
-    `;
-    wrap.appendChild(div);
+  renderAll();
+  saveState();
+}
+
+function maybeGenerateLimitEvents(stock) {
+  const rate = getStockRate(stock);
+  if (rate >= 29.7 && Math.random() < 0.04) {
+    addNews("good", stock, `${stock.name}, 상한가 부근 진입`, `${stock.name}이 상한가 수준까지 접근했다. 강한 매수세가 이어지며 변동성이 매우 커진 상태다.`);
+    addAlert(`${stock.name} 상한가 부근 진입`, stock, "alert");
+  } else if (rate <= -29.7 && Math.random() < 0.04) {
+    addNews("warn", stock, `${stock.name}, 하한가 부근 급락`, `${stock.name}이 하한가 수준까지 밀렸다. 단기 반등 시도보다 변동성 관리가 우선인 구간이다.`);
+    addAlert(`${stock.name} 하한가 부근 급락`, stock, "alert");
+  } else if (Math.abs(rate) > 12 && Math.random() < 0.02) {
+    const positive = rate > 0;
+    addNews(
+      positive ? "breaking" : "warn",
+      stock,
+      `${stock.name}, ${positive ? "급등" : "급락"} 변동성 확대`,
+      `${stock.name}의 장중 변동률이 ${formatSignedPct(rate)}를 기록 중이다. 거래량 확대와 함께 단기 변동성이 매우 커진 상태다.`
+    );
+    addAlert(`${stock.name} ${positive ? "급등" : "급락"} 감지`, stock, "alert");
+  }
+}
+
+function updateOrderbook(stock) {
+  stock.orderbook.forEach(row => {
+    const oldQty = row.qty;
+    const qtyMove = randInt(-100, 140);
+    row.qty = clamp(oldQty + qtyMove, 20, 2000);
+    row.flash = row.qty > oldQty ? 1 : row.qty < oldQty ? -1 : 0;
+  });
+
+  const base = stock.currentPrice;
+  const asks = stock.orderbook.filter(r => r.side === "ask");
+  const bids = stock.orderbook.filter(r => r.side === "bid");
+
+  asks.forEach((row, idx) => {
+    row.price = Math.max(100, Math.round(base * (1 + (asks.length - idx) * 0.002)));
+  });
+
+  bids.forEach((row, idx) => {
+    row.price = Math.max(100, Math.round(base * (1 - (idx + 1) * 0.002)));
   });
 }
 
-function drawCandles(sm) {
-  const canvas = $("#candleCanvas");
-  const tooltip = $("#chartTooltip");
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  const width = Math.max(320, Math.floor(rect.width));
-  const height = 360;
+function calcMA(candles, period) {
+  const result = [];
+  for (let i = 0; i < candles.length; i++) {
+    if (i < period - 1) {
+      result.push(null);
+      continue;
+    }
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      sum += candles[j].close;
+    }
+    result.push(sum / period);
+  }
+  return result;
+}
 
-  canvas.width = width * dpr;
-  canvas.height = height * dpr;
+function getDisplayCandles(stock) {
+  const all = stock.candles;
+  if (state.chartRange === "1m") return all.slice(-80);
+  if (state.chartRange === "5m") return compressCandles(all, 5).slice(-80);
+  if (state.chartRange === "1d") return compressCandles(all, 10).slice(-80);
+  if (state.chartRange === "1w") return compressCandles(all, 20).slice(-80);
+  return all.slice(-80);
+}
 
+function compressCandles(candles, step) {
+  const result = [];
+  for (let i = 0; i < candles.length; i += step) {
+    const chunk = candles.slice(i, i + step);
+    if (!chunk.length) continue;
+    result.push({
+      time: chunk[chunk.length - 1].time,
+      open: chunk[0].open,
+      close: chunk[chunk.length - 1].close,
+      high: Math.max(...chunk.map(c => c.high)),
+      low: Math.min(...chunk.map(c => c.low)),
+      volume: chunk.reduce((s, c) => s + c.volume, 0)
+    });
+  }
+  return result;
+}
+
+function drawChart() {
+  const canvas = els.priceChart;
   const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-
-  const candles = sm.getCandleSeries().slice(-60);
-  if (!candles.length) return;
-
+  const stock = getSelectedStock();
+  const candles = getDisplayCandles(stock);
   const ma5 = calcMA(candles, 5);
   const ma20 = calcMA(candles, 20);
   const ma60 = calcMA(candles, 60);
 
-  const padL = 12;
-  const padR = 56;
-  const padT = 12;
-  const volH = 68;
-  const gap = 10;
-  const padB = 20;
-  const priceChartH = height - padT - padB - volH - gap;
-  const volTop = padT + priceChartH + gap;
-  const chartW = width - padL - padR;
+  canvas.width = CANVAS_W;
+  canvas.height = CANVAS_H;
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
-  const highs = candles.map(c => c.high);
-  const lows = candles.map(c => c.low);
-  const maxP = Math.max(...highs);
-  const minP = Math.min(...lows);
-  const range = Math.max(1, maxP - minP);
+  const pad = { left: 70, right: 76, top: 26, bottom: 74 };
+  const volumeH = 150;
+  const chartBottom = CANVAS_H - pad.bottom - volumeH - 12;
+  const chartTop = pad.top;
+  const chartHeight = chartBottom - chartTop;
+  const chartWidth = CANVAS_W - pad.left - pad.right;
+  const volTop = chartBottom + 24;
+  const volHeight = volumeH - 24;
 
-  const maxVol = Math.max(...candles.map(c => c.volume), 1);
+  const maxPrice = Math.max(...candles.map(c => c.high)) * 1.02;
+  const minPrice = Math.min(...candles.map(c => c.low)) * 0.98;
+  const maxVolume = Math.max(...candles.map(c => c.volume), 1);
 
-  ctx.strokeStyle = "rgba(255,255,255,.06)";
+  ctx.fillStyle = "#0c1220";
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.06)";
   ctx.lineWidth = 1;
 
-  for (let i = 0; i < 5; i++) {
-    const y = padT + (priceChartH / 4) * i;
+  for (let i = 0; i <= 5; i++) {
+    const y = chartTop + (chartHeight / 5) * i;
     ctx.beginPath();
-    ctx.moveTo(padL, y);
-    ctx.lineTo(width - padR, y);
-    ctx.stroke();
-
-    const priceLabel = maxP - (range / 4) * i;
-    ctx.fillStyle = "rgba(203,213,225,.82)";
-    ctx.font = "11px Inter";
-    ctx.fillText(fmtNum(priceLabel), width - padR + 6, y + 4);
-  }
-
-  ctx.beginPath();
-  ctx.moveTo(padL, volTop);
-  ctx.lineTo(width - padR, volTop);
-  ctx.stroke();
-
-  const slotW = chartW / candles.length;
-  const bodyW = Math.max(4, slotW * 0.56);
-
-  function py(price) {
-    return padT + ((maxP - price) / range) * priceChartH;
-  }
-
-  function drawLine(values, color) {
-    ctx.beginPath();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.6;
-    let started = false;
-    values.forEach((v, i) => {
-      if (v == null) return;
-      const x = padL + slotW * i + slotW / 2;
-      const y = py(v);
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else {
-        ctx.lineTo(x, y);
-      }
-    });
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(CANVAS_W - pad.right, y);
     ctx.stroke();
   }
 
-  drawLine(ma5, "#f59e0b");
-  drawLine(ma20, "#10b981");
-  drawLine(ma60, "#8b5cf6");
+  for (let i = 0; i <= 6; i++) {
+    const x = pad.left + (chartWidth / 6) * i;
+    ctx.beginPath();
+    ctx.moveTo(x, chartTop);
+    ctx.lineTo(x, CANVAS_H - pad.bottom);
+    ctx.stroke();
+  }
+
+  const candleW = chartWidth / candles.length * 0.64;
+
+  function priceToY(price) {
+    return chartTop + ((maxPrice - price) / (maxPrice - minPrice)) * chartHeight;
+  }
+
+  function volToY(vol) {
+    return volTop + volHeight - (vol / maxVolume) * volHeight;
+  }
 
   candles.forEach((c, i) => {
-    const x = padL + slotW * i + slotW / 2;
-    const yHigh = py(c.high);
-    const yLow = py(c.low);
-    const yOpen = py(c.open);
-    const yClose = py(c.close);
-
+    const x = pad.left + (i + 0.5) * (chartWidth / candles.length);
+    const openY = priceToY(c.open);
+    const closeY = priceToY(c.close);
+    const highY = priceToY(c.high);
+    const lowY = priceToY(c.low);
     const up = c.close >= c.open;
-    const color = up ? "#ff5a7a" : "#56a2ff";
 
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = 1.2;
-
+    ctx.strokeStyle = up ? "#ff6482" : "#5daeff";
     ctx.beginPath();
-    ctx.moveTo(x, yHigh);
-    ctx.lineTo(x, yLow);
+    ctx.moveTo(x, highY);
+    ctx.lineTo(x, lowY);
     ctx.stroke();
 
-    const bodyY = Math.min(yOpen, yClose);
-    const bodyH = Math.max(2, Math.abs(yClose - yOpen));
-    ctx.fillRect(x - bodyW / 2, bodyY, bodyW, bodyH);
+    ctx.fillStyle = up ? "#ff5c7c" : "#4ea1ff";
+    const bodyY = Math.min(openY, closeY);
+    const bodyH = Math.max(2, Math.abs(closeY - openY));
+    ctx.fillRect(x - candleW / 2, bodyY, candleW, bodyH);
 
-    const volBarH = (c.volume / maxVol) * (volH - 10);
-    ctx.globalAlpha = 0.7;
-    ctx.fillRect(x - bodyW / 2, volTop + (volH - volBarH), bodyW, volBarH);
-    ctx.globalAlpha = 1;
+    const vy = volToY(c.volume);
+    ctx.fillStyle = up ? "rgba(255,92,124,.9)" : "rgba(78,161,255,.9)";
+    ctx.fillRect(x - candleW / 2, vy, candleW, volTop + volHeight - vy);
   });
 
-  if (app.chartHoverIndex != null) {
-    const i = Math.max(0, Math.min(candles.length - 1, app.chartHoverIndex));
-    const c = candles[i];
-    const x = padL + slotW * i + slotW / 2;
+  drawMALine(ctx, ma5, candles, pad, chartWidth, priceToY, "#ff7f97");
+  drawMALine(ctx, ma20, candles, pad, chartWidth, priceToY, "#ff9d4d");
+  drawMALine(ctx, ma60, candles, pad, chartWidth, priceToY, "#b976ff");
+
+  ctx.fillStyle = "#9db0d8";
+  ctx.font = "12px Pretendard, sans-serif";
+  ctx.textAlign = "right";
+  for (let i = 0; i <= 5; i++) {
+    const y = chartTop + (chartHeight / 5) * i;
+    const price = maxPrice - ((maxPrice - minPrice) / 5) * i;
+    ctx.fillText(formatKRW(price), CANVAS_W - 12, y + 4);
+  }
+
+  for (let i = 0; i <= 2; i++) {
+    const y = volTop + (volHeight / 2) * i;
+    const vol = maxVolume - (maxVolume / 2) * i;
+    ctx.fillText(formatVolume(vol), CANVAS_W - 12, y + 4);
+  }
+
+  ctx.fillStyle = "rgba(255,255,255,.9)";
+  ctx.font = "13px Pretendard, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("가격", 18, 28);
+  ctx.fillStyle = "rgba(255,255,255,.7)";
+  ctx.fillText("거래량", 18, volTop - 8);
+
+  if (state.hoverIndex >= 0 && state.hoverIndex < candles.length) {
+    const i = state.hoverIndex;
+    const x = pad.left + (i + 0.5) * (chartWidth / candles.length);
 
     ctx.strokeStyle = "rgba(255,255,255,.22)";
-    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 5]);
     ctx.beginPath();
-    ctx.moveTo(x, padT);
-    ctx.lineTo(x, volTop + volH);
+    ctx.moveTo(x, chartTop);
+    ctx.lineTo(x, CANVAS_H - pad.bottom);
     ctx.stroke();
+    ctx.setLineDash([]);
 
+    const c = candles[i];
+    const tooltip = els.chartTooltip;
     tooltip.classList.remove("hidden");
-    tooltip.innerHTML =
-      `시가 ${fmtWon(c.open)}<br>` +
-      `고가 ${fmtWon(c.high)}<br>` +
-      `저가 ${fmtWon(c.low)}<br>` +
-      `종가 ${fmtWon(c.close)}<br>` +
-      `거래량 ${fmtNum(c.volume)}`;
-    const canvasBox = canvas.getBoundingClientRect();
-    let left = canvasBox.left + x + 12;
-    let top = canvasBox.top + 20;
-    tooltip.style.left = `${Math.min(window.innerWidth - 180, left)}px`;
-    tooltip.style.top = `${top}px`;
+    tooltip.innerHTML = `
+      <div><b>${stock.name}</b></div>
+      <div>시가: ${formatKRW(c.open)}</div>
+      <div>고가: ${formatKRW(c.high)}</div>
+      <div>저가: ${formatKRW(c.low)}</div>
+      <div>종가: ${formatKRW(c.close)}</div>
+      <div>거래량: ${formatVolume(c.volume)}</div>
+    `;
+    const rect = canvas.getBoundingClientRect();
+    const ratioX = rect.width / CANVAS_W;
+    const ratioY = rect.height / CANVAS_H;
+    const left = (x * ratioX) + 18;
+    const top = (priceToY(c.high) * ratioY) + 12;
+    tooltip.style.left = `${Math.min(left, rect.width - 220)}px`;
+    tooltip.style.top = `${Math.min(top, rect.height - 150)}px`;
   } else {
-    tooltip.classList.add("hidden");
+    els.chartTooltip.classList.add("hidden");
   }
 }
 
-function renderSelectedPanel() {
-  const sym = app.selectedSymbol;
-  const sm = app.market.symbols[sym];
-  const h = app.myPortfolio.getHolding(sym);
-
-  const d = sm.lastDeltaPct * 100;
-  const halted = sm.isHalted(app.market.tick);
-  const cls = moveClass(d, halted, sm.limitState);
-  const priceGap = sm.prevClose > 0 ? ((sm.price - sm.prevClose) / sm.prevClose) * 100 : 0;
-
-  $("#selectedName").textContent = `${sm.name} · ${sm.symbol}`;
-  $("#selectedMeta").textContent = `${sm.sector} · ${sm.theme}`;
-  $("#selectedState").textContent = trendWord(d, halted, sm.limitState);
-  $("#selectedState").className = `selected-state ${cls}`;
-
-  $("#selectedPrice").textContent = fmtWon(sm.price);
-  const sub = $("#selectedPriceSub");
-  sub.textContent = `전일대비 ${fmtPct(priceGap)} · 실시간 ${fmtPct(d)}`;
-  sub.className = `selected-price-sub ${cls}`;
-  $("#selectedSparkline").textContent = sparkline(sm.history.slice(-80));
-
-  $("#holdQty").textContent = `${h.qty}주`;
-  $("#holdAvg").textContent = h.qty > 0 ? fmtWon(h.avg) : "없음";
-
-  const pnl = h.qty > 0 ? (sm.price - h.avg) * h.qty : 0;
-  const rate = h.qty > 0 && h.avg > 0 ? ((sm.price - h.avg) / h.avg) * 100 : 0;
-  const pnlEl = $("#holdPnl");
-  pnlEl.textContent = fmtSignedWon(pnl);
-  pnlEl.className = pnl > 0 ? "up" : pnl < 0 ? "down" : "neutral";
-  const rateEl = $("#holdRate");
-  rateEl.textContent = fmtPct(rate);
-  rateEl.className = rate > 0 ? "up" : rate < 0 ? "down" : "neutral";
-
-  $("#stockInfoBox").textContent =
-    `업종 ${sm.sector}\n테마 ${sm.theme}\n${sm.desc}\n\n실시간 뉴스: ${sm.activeNewsText(app.market.tick)}`;
-
-  $("#priceInfoBox").textContent =
-    `전일 종가 ${fmtWon(sm.prevClose)}\n` +
-    `시가 ${fmtWon(sm.dayOpen)} · 고가 ${fmtWon(sm.dayHigh)} · 저가 ${fmtWon(sm.dayLow)}\n` +
-    `상한가 ${fmtWon(sm.limitUpPrice())} · 하한가 ${fmtWon(sm.limitDownPrice())}\n` +
-    `거래량 ${fmtNum(sm.dayVolume)}주 · 변동성 ${sm.volatilityPct().toFixed(2)}%\n` +
-    `수익률 바 ${ratioBar(app.myPortfolio.totalReturnPct(currentPrices(app.market)))}`;
-
-  $("#orderbookBox").textContent = formatOrderbook(sm.price);
-  $("#tradeTapeBox").textContent = formatTradeTape(sm.tradeTape);
-  $("#investorBox").textContent = formatInvestorSummary(sm);
-
-  renderAllocation();
-  drawCandles(sm);
+function drawMALine(ctx, lineData, candles, pad, chartWidth, priceToY, color) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  let started = false;
+  lineData.forEach((v, i) => {
+    if (v == null) return;
+    const x = pad.left + (i + 0.5) * (chartWidth / candles.length);
+    const y = priceToY(v);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
 }
 
-function renderSymbolOptions() {
-  const select = $("#symbolSelect");
-  select.innerHTML = "";
-  Object.values(app.market.symbols).forEach(sm => {
-    const op = document.createElement("option");
-    op.value = sm.symbol;
-    op.textContent = `${sm.name} (${sm.symbol})`;
-    select.appendChild(op);
-  });
-  select.value = app.selectedSymbol;
+function renderSelectedHeader() {
+  const stock = getSelectedStock();
+  const rate = getStockRate(stock);
+  const diff = stock.currentPrice - stock.prevClose;
+
+  els.selectedName.textContent = stock.name;
+  els.selectedCode.textContent = `${stock.code} · ${stock.theme}`;
+  els.symbolLogo.textContent = stock.logo;
+  els.selectedPrice.textContent = formatKRW(stock.currentPrice);
+  els.selectedChange.textContent = `${formatSignedKRW(diff)} (${formatSignedPct(rate)})`;
+  els.selectedChange.className = `price-change ${rate >= 0 ? "positive" : "negative"}`;
+  els.dayHigh.textContent = formatKRW(stock.dayHigh);
+  els.dayLow.textContent = formatKRW(stock.dayLow);
+  els.dayOpen.textContent = formatKRW(stock.candles[0].open);
+  els.dayVolume.textContent = formatVolume(stock.candles.reduce((s, c) => s + c.volume, 0));
+
+  const holding = getHolding(stock.code);
+  els.holdingQtyInline.textContent = `${holding.qty.toLocaleString("ko-KR")}주`;
+  els.avgPriceInline.textContent = holding.qty > 0 ? formatKRW(holding.avgPrice) : "0원";
+  els.availableCash.textContent = formatKRW(state.portfolio.cash);
+  els.maxBuyQty.textContent = `${Math.floor(state.portfolio.cash / Math.max(1, stock.currentPrice)).toLocaleString("ko-KR")}주`;
+  els.currentHoldingQty.textContent = `${holding.qty.toLocaleString("ko-KR")}주`;
+  els.currentAvgPrice.textContent = holding.qty > 0 ? formatKRW(holding.avgPrice) : "0원";
+
+  els.favoriteToggleBtn.textContent = state.favorites.includes(stock.code) ? "★" : "☆";
+
+  const mood = stock.mood;
+  els.moodFill.style.width = `${mood}%`;
+  els.moodText.textContent = mood >= 68 ? "매수 우위" : mood <= 34 ? "매도 우위" : "중립";
+
+  els.orderPrice.value = Math.round(stock.currentPrice);
+  updateEstimate();
+}
+
+function renderPortfolio() {
+  const total = getTotalAsset();
+  const stockValue = getStockEvaluation();
+  const invested = getInvestedAmount();
+  const pl = getProfitLoss();
+  const rate = getProfitRate();
+
+  els.totalAssetTop.textContent = formatKRW(total);
+  els.profitLossTop.textContent = formatSignedKRW(pl);
+  els.cashTop.textContent = formatKRW(state.portfolio.cash);
+
+  els.portfolioTotal.textContent = formatKRW(total);
+  els.portfolioPL.textContent = `${formatSignedKRW(pl)} (${formatSignedPct(rate)})`;
+  els.portfolioPL.className = `portfolio-pl ${pl >= 0 ? "positive" : "negative"}`;
+
+  els.portfolioCash.textContent = formatKRW(state.portfolio.cash);
+  els.portfolioStockValue.textContent = formatKRW(stockValue);
+  els.portfolioInvested.textContent = formatKRW(invested);
+  els.portfolioRate.textContent = formatSignedPct(rate);
+  els.portfolioRate.className = rate >= 0 ? "positive" : "negative";
+}
+
+function renderWatchlist() {
+  const watchlist = [...state.stocks];
+  const q = state.searchTerm.trim().toLowerCase();
+
+  let filtered = watchlist.filter(s =>
+    s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q) || s.theme.toLowerCase().includes(q)
+  );
+
+  if (state.sortBy === "change") {
+    filtered.sort((a, b) => getStockRate(b) - getStockRate(a));
+  } else if (state.sortBy === "volume") {
+    filtered.sort((a, b) => b.currentVolume - a.currentVolume);
+  }
+
+  const maxVolume = Math.max(...filtered.map(s => s.currentVolume), 1);
+
+  els.watchlist.innerHTML = filtered.map(stock => {
+    const rate = getStockRate(stock);
+    const diff = stock.currentPrice - stock.prevClose;
+    const isActive = stock.code === state.selectedCode;
+    const volumePct = (stock.currentVolume / maxVolume) * 100;
+    return `
+      <div class="watch-item ${isActive ? "active" : ""}" data-code="${stock.code}">
+        <div class="watch-top">
+          <div class="watch-left">
+            <div class="watch-logo">${stock.logo}</div>
+            <div class="watch-name-wrap">
+              <div class="watch-name">${stock.name}</div>
+              <div class="watch-code">${stock.code} · ${stock.theme}</div>
+            </div>
+          </div>
+          <div class="watch-right">
+            <div class="watch-price">${formatKRW(stock.currentPrice)}</div>
+            <div class="watch-change ${rate >= 0 ? "positive" : "negative"}">
+              ${formatSignedKRW(diff)} (${formatSignedPct(rate)})
+            </div>
+          </div>
+        </div>
+        <div class="watch-bottom">
+          <div class="volume-bar"><div class="volume-fill" style="width:${volumePct}%"></div></div>
+          <div class="watch-mini">거래량 ${formatVolume(stock.currentVolume)}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  renderFavorites();
+  els.marketAlertBadge.textContent = String(state.marketAlertCount);
+}
+
+function renderFavorites() {
+  const favorites = state.favorites
+    .map(code => state.stocks.find(s => s.code === code))
+    .filter(Boolean);
+
+  if (!favorites.length) {
+    els.favoritesList.className = "watchlist-block empty-state-box";
+    els.favoritesList.innerHTML = "즐겨찾기한 종목이 없다";
+    return;
+  }
+
+  els.favoritesList.className = "watchlist-block";
+  els.favoritesList.innerHTML = favorites.map(stock => {
+    const rate = getStockRate(stock);
+    return `
+      <div class="watch-item ${stock.code === state.selectedCode ? "active" : ""}" data-code="${stock.code}">
+        <div class="watch-top">
+          <div class="watch-left">
+            <div class="watch-logo">${stock.logo}</div>
+            <div class="watch-name-wrap">
+              <div class="watch-name">${stock.name}</div>
+              <div class="watch-code">${stock.code}</div>
+            </div>
+          </div>
+          <div class="watch-right">
+            <div class="watch-price">${formatKRW(stock.currentPrice)}</div>
+            <div class="watch-change ${rate >= 0 ? "positive" : "negative"}">${formatSignedPct(rate)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderOrderbook() {
+  const stock = getSelectedStock();
+  els.orderbookRows.innerHTML = stock.orderbook.map(row => `
+    <div class="order-row ${row.side} ${row.flash > 0 ? "flash-up" : row.flash < 0 ? "flash-down" : ""}">
+      <span class="order-qty ${row.side === "ask" ? "sell-color" : ""}">${row.side === "ask" ? row.qty.toLocaleString("ko-KR") : ""}</span>
+      <span class="order-price ${row.side === "ask" ? "sell-color" : "buy-color"}">${formatKRW(row.price)}</span>
+      <span class="order-qty ${row.side === "bid" ? "buy-color" : ""}">${row.side === "bid" ? row.qty.toLocaleString("ko-KR") : ""}</span>
+    </div>
+  `).join("");
+}
+
+function renderNews() {
+  els.newsFeed.innerHTML = state.news.map(item => `
+    <div class="news-card">
+      <div class="news-top">
+        <span class="news-type ${item.type}">${typeLabel(item.type)}</span>
+        <span class="news-time">${item.time}</span>
+      </div>
+      <div class="news-title">${item.title}</div>
+      <div class="news-desc">${item.desc}</div>
+    </div>
+  `).join("");
+  els.newsCountChip.textContent = `${state.news.length}건`;
+}
+
+function renderHistory() {
+  els.orderHistoryList.innerHTML = state.orderHistory.map(item => `
+    <div class="history-card">
+      <div class="history-card-top">
+        <span class="history-type ${item.type}">${item.type === "buy" ? "매수 체결" : "매도 체결"}</span>
+        <span class="history-time">${item.time}</span>
+      </div>
+      <div class="history-main">${item.name} · ${item.qty.toLocaleString("ko-KR")}주 · ${formatKRW(item.price)}</div>
+      <div class="history-sub">총 ${formatKRW(item.amount)} · ${item.note}</div>
+    </div>
+  `).join("");
+
+  els.alertHistoryList.innerHTML = state.alerts.map(item => `
+    <div class="history-card">
+      <div class="history-card-top">
+        <span class="history-type alert">시장 알림</span>
+        <span class="history-time">${item.time}</span>
+      </div>
+      <div class="history-main">${item.message}</div>
+      <div class="history-sub">${item.name ? `${item.name} · ${item.code}` : "전체 시장"}</div>
+    </div>
+  `).join("");
+
+  els.alertBadge.textContent = String(state.alertCount);
+}
+
+function updateEstimate() {
+  const price = Math.max(1, parseInt(els.orderPrice.value || "0", 10));
+  const qty = Math.max(0, parseInt(els.orderQty.value || "0", 10));
+  const amount = price * qty;
+  const fee = amount * 0.0015;
+  els.estimatedCost.textContent = formatKRW(amount);
+  els.estimatedFee.textContent = formatKRW(fee);
 }
 
 function renderAll() {
-  renderHeadlines();
-  renderAccountSummary();
-  renderRanking();
-  renderStocks();
-  renderSelectedPanel();
-  $("#speedBtn").textContent = `속도 x${Math.round(1000 / app.tickMs)}`;
+  renderSelectedHeader();
+  renderPortfolio();
+  renderWatchlist();
+  renderOrderbook();
+  renderNews();
+  renderHistory();
+  drawChart();
+  updateSpeedButtons();
+  updateOrderModeButtons();
 }
 
-function tickLoop() {
-  if (!app.running) return;
-  app.market.step();
-  app.rivals.forEach(r => r.step(app.market));
-  saveState();
+function updateSpeedButtons() {
+  document.querySelectorAll("#speedButtons button").forEach(btn => {
+    btn.classList.toggle("active", Number(btn.dataset.speed) === state.speed);
+  });
+}
+
+function updateOrderModeButtons() {
+  els.buyModeBtn.classList.toggle("active", state.orderMode === "buy");
+  els.sellModeBtn.classList.toggle("active", state.orderMode === "sell");
+  els.submitOrderBtn.textContent = state.orderMode === "buy" ? "매수 실행" : "매도 실행";
+  els.submitOrderBtn.className = `primary-order-btn ${state.orderMode}`;
+}
+
+function setSelectedStock(code) {
+  if (!state.stocks.some(s => s.code === code)) return;
+  state.selectedCode = code;
   renderAll();
+  saveState();
 }
 
-function restartLoop() {
-  if (app.timerId) clearInterval(app.timerId);
-  app.timerId = setInterval(tickLoop, app.tickMs);
+function toggleFavorite() {
+  const code = state.selectedCode;
+  const idx = state.favorites.indexOf(code);
+  const stock = getSelectedStock();
+
+  if (idx >= 0) {
+    state.favorites.splice(idx, 1);
+    addAlert(`${stock.name} 즐겨찾기 해제`, stock, "alert");
+  } else {
+    state.favorites.unshift(code);
+    state.favorites = [...new Set(state.favorites)].slice(0, 10);
+    addAlert(`${stock.name} 즐겨찾기 추가`, stock, "alert");
+  }
+  renderAll();
+  saveState();
+}
+
+function executeOrder() {
+  const stock = getSelectedStock();
+  const price = Math.max(1, parseInt(els.orderPrice.value || "0", 10));
+  const qty = Math.max(0, parseInt(els.orderQty.value || "0", 10));
+
+  if (!qty) {
+    alert("수량을 입력해줘.");
+    return;
+  }
+
+  const amount = price * qty;
+  const fee = Math.round(amount * 0.0015);
+  const holding = getHolding(stock.code);
+
+  if (state.orderMode === "buy") {
+    const totalCost = amount + fee;
+    if (state.portfolio.cash < totalCost) {
+      alert("예수금이 부족하다.");
+      return;
+    }
+
+    const newQty = holding.qty + qty;
+    const newAvg = newQty > 0
+      ? ((holding.avgPrice * holding.qty) + amount) / newQty
+      : 0;
+
+    state.portfolio.cash -= totalCost;
+    state.portfolio.holdings[stock.code] = {
+      qty: newQty,
+      avgPrice: newAvg
+    };
+
+    addOrderHistory("buy", stock, qty, price, totalCost, `수수료 ${formatKRW(fee)} 포함`);
+    addAlert(`${stock.name} ${qty.toLocaleString("ko-KR")}주 매수 체결`, stock, "alert");
+  } else {
+    if (holding.qty < qty) {
+      alert("보유 수량이 부족하다.");
+      return;
+    }
+
+    const proceeds = amount - fee;
+    const remainQty = holding.qty - qty;
+
+    state.portfolio.cash += proceeds;
+    if (remainQty <= 0) {
+      delete state.portfolio.holdings[stock.code];
+    } else {
+      state.portfolio.holdings[stock.code] = {
+        qty: remainQty,
+        avgPrice: holding.avgPrice
+      };
+    }
+
+    addOrderHistory("sell", stock, qty, price, proceeds, `수수료 ${formatKRW(fee)} 차감`);
+    addAlert(`${stock.name} ${qty.toLocaleString("ko-KR")}주 매도 체결`, stock, "alert");
+  }
+
+  renderAll();
+  saveState();
+}
+
+function setOrderRatio(ratio) {
+  const stock = getSelectedStock();
+  const holding = getHolding(stock.code);
+  const price = Math.max(1, parseInt(els.orderPrice.value || stock.currentPrice, 10));
+
+  if (state.orderMode === "buy") {
+    const maxQty = Math.floor(state.portfolio.cash / (price * 1.0015));
+    els.orderQty.value = Math.max(1, Math.floor(maxQty * ratio));
+  } else {
+    els.orderQty.value = Math.max(1, Math.floor(holding.qty * ratio));
+  }
+  updateEstimate();
+}
+
+function sellAll() {
+  state.orderMode = "sell";
+  updateOrderModeButtons();
+  const holding = getHolding(state.selectedCode);
+  if (holding.qty <= 0) {
+    alert("전량 매도할 보유 수량이 없다.");
+    return;
+  }
+  els.orderQty.value = holding.qty;
+  els.orderPrice.value = Math.round(getSelectedStock().currentPrice);
+  updateEstimate();
 }
 
 function bindEvents() {
-  $("#symbolSelect").addEventListener("change", (e) => {
-    app.selectedSymbol = e.target.value;
-    app.chartHoverIndex = null;
+  els.favoriteToggleBtn.addEventListener("click", toggleFavorite);
+
+  document.getElementById("speedButtons").addEventListener("click", e => {
+    const btn = e.target.closest("button[data-speed]");
+    if (!btn) return;
+    state.speed = Number(btn.dataset.speed);
+    updateSpeedButtons();
     saveState();
-    renderSelectedPanel();
   });
 
-  $("#buyBtn").addEventListener("click", () => openModal("BUY"));
-  $("#sellBtn").addEventListener("click", () => openModal("SELL"));
+  document.querySelectorAll(".sort-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.sortBy = btn.dataset.sort;
+      document.querySelectorAll(".sort-btn").forEach(b => b.classList.toggle("active", b === btn));
+      renderWatchlist();
+      saveState();
+    });
+  });
 
-  $("#buyAllBtn").addEventListener("click", () => {
-    const sm = app.market.symbols[app.selectedSymbol];
-    const xprice = execPrice(sm.price, "BUY");
-    const maxQty = Math.floor(app.myPortfolio.cash / (xprice * (1 + FEE_RATE)));
-    if (maxQty <= 0) {
-      showToast("전량매수 가능한 수량이 없음", "error");
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.chartRange = btn.dataset.chartRange;
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b === btn));
+      drawChart();
+    });
+  });
+
+  document.querySelectorAll(".history-tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".history-tab").forEach(b => b.classList.toggle("active", b === btn));
+      const tab = btn.dataset.historyTab;
+      els.orderHistoryList.classList.toggle("hidden", tab !== "orders");
+      els.alertHistoryList.classList.toggle("hidden", tab !== "alerts");
+    });
+  });
+
+  els.searchInput.addEventListener("input", e => {
+    state.searchTerm = e.target.value || "";
+    renderWatchlist();
+  });
+
+  els.buyModeBtn.addEventListener("click", () => {
+    state.orderMode = "buy";
+    updateOrderModeButtons();
+  });
+
+  els.sellModeBtn.addEventListener("click", () => {
+    state.orderMode = "sell";
+    updateOrderModeButtons();
+  });
+
+  els.submitOrderBtn.addEventListener("click", executeOrder);
+
+  document.querySelector(".quick-buttons").addEventListener("click", e => {
+    const btn = e.target.closest("button[data-ratio]");
+    if (btn) {
+      setOrderRatio(Number(btn.dataset.ratio));
       return;
     }
-    executeTrade("BUY", maxQty);
-  });
-
-  $("#sellAllBtn").addEventListener("click", () => {
-    const h = app.myPortfolio.getHolding(app.selectedSymbol);
-    if (h.qty <= 0) {
-      showToast("전량매도할 보유 수량이 없음", "error");
-      return;
-    }
-    executeTrade("SELL", h.qty);
-  });
-
-  $("#modalSubmitBtn").addEventListener("click", () => {
-    const qty = parseInt($("#tradeQtyInput").value, 10);
-    const ok = executeTrade(app.tradeMode, qty);
-    if (ok) closeModal();
-  });
-
-  $("#modalCloseBtn").addEventListener("click", closeModal);
-  $("#tradeModal").addEventListener("click", (e) => {
-    if (e.target.dataset.close === "true") closeModal();
-  });
-
-  $("#detailCloseBtn").addEventListener("click", closeDetailModal);
-  $("#detailModal").addEventListener("click", (e) => {
-    if (e.target.dataset.closeDetail === "true") closeDetailModal();
-  });
-
-  $("#pauseBtn").addEventListener("click", () => {
-    app.running = !app.running;
-    $("#pauseBtn").textContent = app.running ? "일시정지" : "재개";
-    showToast(app.running ? "시뮬레이션 재개" : "시뮬레이션 일시정지", "info");
-    renderHeadlines();
-  });
-
-  $("#speedBtn").addEventListener("click", () => {
-    app.speedIndex = (app.speedIndex + 1) % SPEED_MODES.length;
-    app.tickMs = SPEED_MODES[app.speedIndex];
-    restartLoop();
-    saveState();
-    renderAll();
-    showToast(`속도 변경 · x${Math.round(1000 / app.tickMs)}`, "info");
-  });
-
-  $("#resetBtn").addEventListener("click", () => {
-    const ok = confirm("모든 데이터와 포트폴리오를 초기화할까?");
-    if (!ok) return;
-    localStorage.removeItem(STORAGE_KEY);
-    createFreshState();
-    renderSymbolOptions();
-    renderAll();
-    saveState();
-    restartLoop();
-    showToast("초기화 완료", "success");
-  });
-
-  $("#rescueBtn").addEventListener("click", () => {
-    app.myPortfolio.cash += RESCUE_CASH;
-    app.myPortfolio.rescueCount += 1;
-    saveState();
-    renderAll();
-    showToast(`긴급 지원금 ${fmtWon(RESCUE_CASH)} 지급`, "success");
-  });
-
-  const canvas = $("#candleCanvas");
-  canvas.addEventListener("mousemove", (e) => {
-    const sm = app.market.symbols[app.selectedSymbol];
-    const candles = sm.getCandleSeries().slice(-60);
-    if (!candles.length) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const width = rect.width;
-    const padL = 12;
-    const padR = 56;
-    const chartW = width - padL - padR;
-    const slotW = chartW / candles.length;
-    const x = e.clientX - rect.left;
-    const idx = Math.floor((x - padL) / slotW);
-    if (idx >= 0 && idx < candles.length) {
-      app.chartHoverIndex = idx;
-      drawCandles(sm);
+    if (e.target.id === "sellAllBtn") {
+      sellAll();
     }
   });
 
-  canvas.addEventListener("mouseleave", () => {
-    app.chartHoverIndex = null;
-    $("#chartTooltip").classList.add("hidden");
-    drawCandles(app.market.symbols[app.selectedSymbol]);
+  els.orderPrice.addEventListener("input", updateEstimate);
+  els.orderQty.addEventListener("input", updateEstimate);
+
+  els.watchlist.addEventListener("click", e => {
+    const item = e.target.closest(".watch-item[data-code]");
+    if (!item) return;
+    setSelectedStock(item.dataset.code);
   });
 
-  window.addEventListener("resize", () => {
-    renderSelectedPanel();
+  els.favoritesList.addEventListener("click", e => {
+    const item = e.target.closest(".watch-item[data-code]");
+    if (!item) return;
+    setSelectedStock(item.dataset.code);
+  });
+
+  els.clearHistoryBtn.addEventListener("click", () => {
+    state.orderHistory = [];
+    state.alerts = [];
+    state.alertCount = 0;
+    state.marketAlertCount = 0;
+    renderHistory();
+    renderWatchlist();
+    saveState();
+  });
+
+  els.alertBellBtn.addEventListener("click", () => {
+    state.alertCount = 0;
+    renderHistory();
+    saveState();
+  });
+
+  els.priceChart.addEventListener("mousemove", handleChartHover);
+  els.priceChart.addEventListener("mouseleave", () => {
+    state.hoverIndex = -1;
+    drawChart();
   });
 }
 
+function handleChartHover(e) {
+  const canvas = els.priceChart;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const stock = getSelectedStock();
+  const candles = getDisplayCandles(stock);
+  const padLeft = 70;
+  const padRight = 76;
+  const chartWidth = CANVAS_W - padLeft - padRight;
+  const innerX = (x / rect.width) * CANVAS_W - padLeft;
+  const idx = Math.floor((innerX / chartWidth) * candles.length);
+  state.hoverIndex = clamp(idx, 0, candles.length - 1);
+  drawChart();
+}
+
+function cacheElements() {
+  [
+    "selectedName","selectedCode","selectedPrice","selectedChange","dayHigh","dayLow","dayOpen","dayVolume",
+    "favoriteToggleBtn","symbolLogo","moodFill","moodText","watchlist","favoritesList","orderbookRows","newsFeed",
+    "orderHistoryList","alertHistoryList","newsCountChip","orderPrice","orderQty","estimatedCost","estimatedFee",
+    "buyModeBtn","sellModeBtn","submitOrderBtn","searchInput","priceChart","chartTooltip","clearHistoryBtn",
+    "alertBadge","alertBellBtn","marketAlertBadge","holdingQtyInline","avgPriceInline","availableCash","maxBuyQty",
+    "currentHoldingQty","currentAvgPrice","portfolioTotal","portfolioPL","portfolioCash","portfolioStockValue",
+    "portfolioInvested","portfolioRate","totalAssetTop","profitLossTop","cashTop"
+  ].forEach(id => els[id] = document.getElementById(id));
+}
+
+function seedInitialNews() {
+  const shuffled = [...state.stocks].sort(() => Math.random() - 0.5).slice(0, 12);
+  shuffled.forEach(stock => createRandomNews(stock));
+}
+
 function init() {
+  cacheElements();
+
   const loaded = loadState();
-  if (!loaded) createFreshState();
-  renderSymbolOptions();
+  if (!loaded) {
+    buildInitialStocks();
+    seedInitialNews();
+  }
+
+  document.querySelectorAll(".sort-btn").forEach(b => b.classList.toggle("active", b.dataset.sort === state.sortBy));
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.chartRange === state.chartRange));
   bindEvents();
   renderAll();
-  restartLoop();
+  saveState();
+
+  setInterval(simulateTick, 1000);
 }
 
 init();
