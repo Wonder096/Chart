@@ -9,13 +9,11 @@
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div class="topbar-left">
-        <div class="brand-box">
-          <div class="brand-icon">₩</div>
-          <div>
-            <div class="brand-title">K-모의증권 Pro</div>
-            <div class="brand-sub">GitHub Pages Edition · Advanced Dark Trading UI</div>
-          </div>
+      <div class="brand-box">
+        <div class="brand-icon">₩</div>
+        <div>
+          <div class="brand-title">K-모의증권 Pro</div>
+          <div class="brand-sub">GitHub Pages Edition · Advanced Dark Trading UI</div>
         </div>
       </div>
 
@@ -36,11 +34,11 @@
         </div>
 
         <div class="header-actions">
-          <button class="top-action-btn emergency-btn" id="supportFundBtn">긴급지원금 +100만원</button>
-          <button class="top-action-btn control-btn" id="pauseBtn">일시정지</button>
-          <button class="top-action-btn control-btn" id="resumeBtn">재개</button>
-          <button class="top-action-btn control-btn danger-btn" id="stopBtn">정지</button>
-          <button class="icon-btn alert-btn" id="alertBellBtn" title="알림">
+          <button class="top-action-btn emergency-btn" id="supportFundBtn" type="button">긴급지원금 +100만원</button>
+          <button class="top-action-btn control-btn" id="pauseBtn" type="button">일시정지</button>
+          <button class="top-action-btn control-btn" id="resumeBtn" type="button">재개</button>
+          <button class="top-action-btn control-btn danger-btn" id="stopBtn" type="button">정지</button>
+          <button class="icon-btn alert-btn" id="alertBellBtn" type="button" title="알림">
             🔔
             <span class="badge" id="alertBadge">0</span>
           </button>
@@ -54,12 +52,19 @@
           <div class="hero-grid">
             <div class="hero-stock">
               <div class="stock-logo" id="symbolLogo">한</div>
+
               <div class="stock-meta">
                 <div class="stock-name-row">
                   <h1 id="selectedName">한강테크</h1>
-                  <button class="favorite-toggle" id="favoriteToggleBtn">☆</button>
+                  <button class="favorite-toggle" id="favoriteToggleBtn" type="button">☆</button>
                 </div>
-                <div class="stock-code" id="selectedCode">KQ001</div>
+
+                <div class="stock-code" id="selectedCode">KQ001 · AI 반도체</div>
+
+                <div class="hero-select-row">
+                  <label for="heroStockSelect">종목 선택</label>
+                  <select id="heroStockSelect"></select>
+                </div>
               </div>
             </div>
 
@@ -75,19 +80,19 @@
             </div>
 
             <div class="hero-side">
-              <div class="speed-section">
+              <div>
                 <div class="section-label">속도</div>
                 <div class="speed-grid" id="speedButtons">
-                  <button data-speed="1" class="active">1x</button>
-                  <button data-speed="2">2x</button>
-                  <button data-speed="5">5x</button>
-                  <button data-speed="10">10x</button>
-                  <button data-speed="20">20x</button>
-                  <button data-speed="50">50x</button>
+                  <button type="button" data-speed="1" class="active">1x</button>
+                  <button type="button" data-speed="2">2x</button>
+                  <button type="button" data-speed="5">5x</button>
+                  <button type="button" data-speed="10">10x</button>
+                  <button type="button" data-speed="20">20x</button>
+                  <button type="button" data-speed="50">50x</button>
                 </div>
               </div>
 
-              <div class="mood-section">
+              <div>
                 <div class="section-label">시장심리</div>
                 <div class="mood-bar">
                   <div id="moodFill"></div>
@@ -100,14 +105,14 @@
 
         <div class="trade-layout">
           <div class="panel chart-panel">
-            <div class="panel-head large-gap">
+            <div class="panel-head">
               <div class="panel-left-head">
                 <h2>차트</h2>
                 <div class="chart-tabs">
-                  <button class="tab-btn active" data-chart-range="1m">1분</button>
-                  <button class="tab-btn" data-chart-range="5m">5분</button>
-                  <button class="tab-btn" data-chart-range="1d">일</button>
-                  <button class="tab-btn" data-chart-range="1w">주</button>
+                  <button type="button" class="tab-btn active" data-chart-range="1m">1분</button>
+                  <button type="button" class="tab-btn" data-chart-range="5m">5분</button>
+                  <button type="button" class="tab-btn" data-chart-range="1d">일</button>
+                  <button type="button" class="tab-btn" data-chart-range="1w">주</button>
                 </div>
               </div>
 
@@ -154,8 +159,8 @@
               </div>
 
               <div class="trade-mode-row">
-                <button class="trade-mode active" id="buyModeBtn">매수</button>
-                <button class="trade-mode" id="sellModeBtn">매도</button>
+                <button class="trade-mode active" id="buyModeBtn" type="button">매수</button>
+                <button class="trade-mode" id="sellModeBtn" type="button">매도</button>
               </div>
 
               <div class="form-group">
@@ -168,20 +173,14 @@
                 <input id="orderQty" type="number" min="1" step="1" value="1" />
               </div>
 
-              <div class="quick-row">
-                <button data-ratio="0.1">10%</button>
-                <button data-ratio="0.25">25%</button>
-                <button data-ratio="0.5">50%</button>
-                <button data-ratio="1">최대</button>
-                <button id="sellAllBtn">전량매도</button>
-              </div>
+              <div class="quick-row" id="quickRow"></div>
 
               <div class="estimate-box">
                 <div><span>예상 주문금액</span><b id="estimatedCost">0원</b></div>
                 <div><span>예상 수수료</span><b id="estimatedFee">0원</b></div>
               </div>
 
-              <button class="primary-order-btn buy" id="submitOrderBtn">매수 실행</button>
+              <button class="primary-order-btn buy" id="submitOrderBtn" type="button">매수 실행</button>
             </div>
 
             <div class="panel orderbook-panel">
@@ -214,11 +213,11 @@
               <div class="panel-left-head">
                 <h2>내 기록</h2>
                 <div class="history-tabs">
-                  <button class="history-tab active" data-history-tab="orders">주문 기록</button>
-                  <button class="history-tab" data-history-tab="alerts">알림 기록</button>
+                  <button type="button" class="history-tab active" data-history-tab="orders">주문 기록</button>
+                  <button type="button" class="history-tab" data-history-tab="alerts">알림 기록</button>
                 </div>
               </div>
-              <button class="ghost-btn" id="clearHistoryBtn">기록 비우기</button>
+              <button class="ghost-btn" id="clearHistoryBtn" type="button">기록 비우기</button>
             </div>
 
             <div id="orderHistoryList" class="history-list"></div>
@@ -262,8 +261,8 @@
           <div class="panel-head watchlist-top">
             <h2>관심종목</h2>
             <div class="sort-row">
-              <button class="sort-btn active" data-sort="change">등락률순</button>
-              <button class="sort-btn" data-sort="volume">거래량순</button>
+              <button type="button" class="sort-btn active" data-sort="change">등락률순</button>
+              <button type="button" class="sort-btn" data-sort="volume">거래량순</button>
             </div>
           </div>
 
