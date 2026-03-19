@@ -127,6 +127,14 @@
               <canvas id="priceChart" width="1280" height="700"></canvas>
               <div class="chart-tooltip hidden" id="chartTooltip"></div>
             </div>
+
+            <div class="selected-news-wrap">
+              <div class="selected-news-head">
+                <h3 id="selectedNewsTitle">해당 종목 뉴스 · 이벤트</h3>
+                <span class="small-chip" id="selectedNewsCount">0건</span>
+              </div>
+              <div id="selectedNewsFeed" class="selected-news-feed"></div>
+            </div>
           </div>
 
           <div class="right-trade-stack">
@@ -136,6 +144,17 @@
                 <div class="order-mini-head">
                   <span>보유 <b id="holdingQtyInline">0주</b></span>
                   <span>평단 <b id="avgPriceInline">0원</b></span>
+                </div>
+              </div>
+
+              <div class="order-top-card">
+                <div class="order-top-left">
+                  <div class="order-top-stock" id="orderTopStockName">한강테크</div>
+                  <div class="order-top-price" id="orderTopPrice">0원</div>
+                </div>
+                <div class="order-top-right">
+                  <div class="order-top-rate-label">등락률</div>
+                  <div class="order-top-rate" id="orderTopRate">+0.00%</div>
                 </div>
               </div>
 
@@ -202,7 +221,7 @@
         <div class="bottom-grid">
           <div class="panel news-panel">
             <div class="panel-head">
-              <h2>뉴스 · 속보 · 이벤트</h2>
+              <h2>전체 뉴스 · 속보 · 이벤트</h2>
               <div class="small-chip" id="newsCountChip">0건</div>
             </div>
             <div id="newsFeed" class="news-feed"></div>
