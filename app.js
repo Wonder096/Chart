@@ -1,4 +1,3 @@
-const SIM_TICK_SECONDS = 1.0;
 const START_CASH = 1_000_000;
 const RESCUE_CASH = 1_000_000;
 
@@ -14,11 +13,13 @@ const HALT_TICKS = 25;
 const HISTORY_LEN = 240;
 const TAPE_LEN = 20;
 const INVESTOR_HISTORY_LEN = 7;
+const CANDLE_LIMIT = 120;
+const TICKS_PER_CANDLE = 5;
 
 const FEE_RATE = 0.001;
 const SLIPPAGE_RATE = 0.0006;
 
-const STORAGE_KEY = "k_mock_stock_state_v1";
+const STORAGE_KEY = "k_mock_stock_pro_v2";
 
 const REGIMES = {
   CALM: { label: "보합권", move: 0.010, eventMul: 0.95, bias: 0.0000, mood: "📍 보합 흐름", cls: "calm" },
@@ -46,48 +47,38 @@ const $ = (sel) => document.querySelector(sel);
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
-
 function rand(min, max) {
   return Math.random() * (max - min) + min;
 }
-
 function fmtWon(x) {
   return `${Math.round(x).toLocaleString("ko-KR")}원`;
 }
-
 function fmtNum(x) {
   return `${Math.round(x).toLocaleString("ko-KR")}`;
 }
-
 function fmtPct(x) {
   const sign = x >= 0 ? "+" : "";
   return `${sign}${x.toFixed(2)}%`;
 }
-
 function fmtSignedWon(x) {
   const sign = x >= 0 ? "+" : "";
   return `${sign}${fmtWon(x)}`;
 }
-
 function fmtSignedNum(x) {
   const sign = x >= 0 ? "+" : "";
   return `${sign}${Math.round(x).toLocaleString("ko-KR")}`;
 }
-
 function clampPrice(p) {
   return Math.max(1, p);
 }
-
 function fee(cost) {
   return cost * FEE_RATE;
 }
-
 function execPrice(marketPrice, side) {
   return side === "BUY"
     ? marketPrice * (1 + SLIPPAGE_RATE)
     : marketPrice * (1 - SLIPPAGE_RATE);
 }
-
 function sparkline(values) {
   if (!values || values.length === 0) return "—";
   const vmin = Math.min(...values);
@@ -99,7 +90,6 @@ function sparkline(values) {
     return SPARKS[idx];
   }).join("");
 }
-
 function moveClass(delta, halted, limitState) {
   if (halted) return "neutral";
   if (limitState === "UP") return "up";
@@ -108,7 +98,6 @@ function moveClass(delta, halted, limitState) {
   if (delta < 0) return "down";
   return "neutral";
 }
-
 function trendWord(delta, halted, limitState) {
   if (halted) return "거래정지";
   if (limitState === "UP") return "상한가";
@@ -117,7 +106,6 @@ function trendWord(delta, halted, limitState) {
   if (delta < 0) return "하락";
   return "보합";
 }
-
 function ratioBar(rate) {
   const r = Math.max(-10, Math.min(10, rate));
   const total = 10;
@@ -127,7 +115,6 @@ function ratioBar(rate) {
   else blue = Math.round((Math.abs(r) / 10) * total);
   return "🟥".repeat(red) + "⬜".repeat(total - red - blue) + "🟦".repeat(blue);
 }
-
 function todayLabel(offset = 0) {
   const d = new Date(Date.now() - offset * 86400000);
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -244,10 +231,13 @@ class SymbolMarket {
 
     this.history = [this.price];
     this.tradeTape = [];
+    this.candles = [];
+    this.currentCandle = null;
 
     this.investorToday = { personal: 0, foreign: 0, institute: 0 };
     this.investorHistory = [];
     this.seedInvestorHistory();
+    this.seedCandles();
   }
 
   seedInvestorHistory() {
@@ -262,6 +252,25 @@ class SymbolMarket {
         foreign: f,
         institute: ins
       });
+    }
+  }
+
+  seedCandles() {
+    let p = this.price;
+    for (let i = 0; i < 30; i++) {
+      const o = p;
+      const c = clampPrice(o * (1 + rand(-0.03, 0.03)));
+      const h = Math.max(o, c) * (1 + rand(0.001, 0.02));
+      const l = Math.min(o, c) * (1 - rand(0.001, 0.02));
+      this.candles.push({
+        time: i,
+        open: o,
+        high: h,
+        low: l,
+        close: c,
+        volume: randInt(2000, 15000)
+      });
+      p = c;
     }
   }
 
@@ -339,7 +348,6 @@ class SymbolMarket {
       ["공매도", "매도 압력 급증", -0.024, -0.010, 6, 12],
       ["실적", "실적 하향 우려 확산", -0.018, -0.007, 6, 12]
     ];
-
     const item = pool[randInt(0, pool.length - 1)];
     this.news = {
       title: item[0],
@@ -367,6 +375,33 @@ class SymbolMarket {
     this.investorToday.institute += institute;
   }
 
+  updateCandle(tick) {
+    const candleTime = Math.floor(tick / TICKS_PER_CANDLE);
+    if (!this.currentCandle || this.currentCandle.time !== candleTime) {
+      if (this.currentCandle) this.candles.push(this.currentCandle);
+      this.currentCandle = {
+        time: candleTime,
+        open: this.price,
+        high: this.price,
+        low: this.price,
+        close: this.price,
+        volume: 0
+      };
+    }
+    this.currentCandle.high = Math.max(this.currentCandle.high, this.price);
+    this.currentCandle.low = Math.min(this.currentCandle.low, this.price);
+    this.currentCandle.close = this.price;
+    this.currentCandle.volume += randInt(80, 800);
+
+    this.candles = this.candles.slice(-CANDLE_LIMIT);
+  }
+
+  getCandleSeries() {
+    const out = [...this.candles];
+    if (this.currentCandle) out.push(this.currentCandle);
+    return out.slice(-CANDLE_LIMIT);
+  }
+
   toJSON() {
     return {
       symbol: this.symbol,
@@ -389,7 +424,9 @@ class SymbolMarket {
       history: this.history,
       tradeTape: this.tradeTape,
       investorToday: this.investorToday,
-      investorHistory: this.investorHistory
+      investorHistory: this.investorHistory,
+      candles: this.candles,
+      currentCandle: this.currentCandle
     };
   }
 
@@ -414,13 +451,8 @@ class Market {
     this.eventFeed = [];
   }
 
-  regimeLabel() {
-    return REGIMES[this.regime].label;
-  }
-
   maybeSwitchRegime() {
     if (this.tick < this.regimeUntil) return;
-
     const r = Math.random();
     if (this.regime === "CALM") {
       this.regime = r < 0.12 ? "MANIA" : (r < 0.22 ? "CRASH" : "CALM");
@@ -429,7 +461,6 @@ class Market {
     } else {
       this.regime = r < 0.58 ? "CALM" : (r < 0.70 ? "MANIA" : "CRASH");
     }
-
     this.regimeUntil = this.tick + (this.regime === "CALM" ? randInt(18, 45) : randInt(12, 28));
   }
 
@@ -459,7 +490,6 @@ class Market {
       limitDown: sm.limitDownPrice(),
       color: sm.color
     }));
-
     rows.sort((a, b) => b.delta - a.delta);
     return rows;
   }
@@ -488,6 +518,7 @@ class Market {
         sm.history.push(sm.price);
         sm.history = sm.history.slice(-HISTORY_LEN);
         sm.dayVolume += randInt(0, 5);
+        sm.updateCandle(this.tick);
         continue;
       }
 
@@ -533,6 +564,7 @@ class Market {
 
       sm.recordTradeTape(sm.price, move);
       sm.updateInvestors(move);
+      sm.updateCandle(this.tick);
 
       if (didShock && Math.abs(move * 100) >= 8) {
         this.eventFeed.unshift(`${move >= 0 ? "🔴 급등" : "🔵 급락"} ${sm.name} ${fmtPct(move * 100)}`);
@@ -576,6 +608,7 @@ class Rival {
     this.name = name;
     this.portfolio = new Portfolio();
     this.portfolio.cash = randInt(800000, 1400000);
+    this.style = randInt(1, 3);
   }
 
   step(market) {
@@ -587,11 +620,14 @@ class Rival {
 
     if (sm.isHalted(market.tick)) return;
 
-    if (Math.random() < 0.52) {
+    const aggressiveness = this.style === 1 ? 0.42 : this.style === 2 ? 0.55 : 0.68;
+    const willBuy = Math.random() < aggressiveness;
+
+    if (willBuy) {
       const xprice = execPrice(sm.price, "BUY");
       const maxQty = Math.floor(this.portfolio.cash / (xprice * (1 + FEE_RATE)));
       if (maxQty > 0) {
-        const qty = randInt(1, Math.max(1, Math.min(maxQty, 8)));
+        const qty = randInt(1, Math.max(1, Math.min(maxQty, this.style * 5)));
         const cost = xprice * qty;
         const f = fee(cost);
         const total = cost + f;
@@ -604,7 +640,7 @@ class Rival {
       }
     } else {
       if (h.qty > 0) {
-        const qty = randInt(1, Math.max(1, Math.min(h.qty, 6)));
+        const qty = randInt(1, Math.max(1, Math.min(h.qty, this.style * 4)));
         const xprice = execPrice(sm.price, "SELL");
         const proceeds = xprice * qty;
         const f = fee(proceeds);
@@ -626,13 +662,15 @@ class Rival {
   toJSON() {
     return {
       name: this.name,
-      portfolio: this.portfolio.toJSON()
+      portfolio: this.portfolio.toJSON(),
+      style: this.style
     };
   }
 
   static from(data) {
     const r = new Rival(data.name);
     r.portfolio = Portfolio.from(data.portfolio || {});
+    r.style = data.style || 1;
     return r;
   }
 }
@@ -644,7 +682,10 @@ const app = {
   selectedSymbol: STOCK_CATALOG[0].symbol,
   running: true,
   timerId: null,
-  tradeMode: "BUY"
+  tradeMode: "BUY",
+  tickMs: 1000,
+  speedIndex: 0,
+  speedModes: [1000, 500, 250]
 };
 
 function currentPrices(market) {
@@ -658,7 +699,9 @@ function saveState() {
     market: app.market.toJSON(),
     myPortfolio: app.myPortfolio.toJSON(),
     rivals: app.rivals.map(r => r.toJSON()),
-    selectedSymbol: app.selectedSymbol
+    selectedSymbol: app.selectedSymbol,
+    tickMs: app.tickMs,
+    speedIndex: app.speedIndex
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
@@ -666,13 +709,14 @@ function saveState() {
 function loadState() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return false;
-
   try {
     const data = JSON.parse(raw);
     app.market = Market.from(data.market || {});
     app.myPortfolio = Portfolio.from(data.myPortfolio || {});
     app.rivals = (data.rivals || []).map(x => Rival.from(x));
     app.selectedSymbol = data.selectedSymbol || STOCK_CATALOG[0].symbol;
+    app.tickMs = data.tickMs || 1000;
+    app.speedIndex = data.speedIndex || 0;
     return true;
   } catch (e) {
     console.error(e);
@@ -685,6 +729,8 @@ function createFreshState() {
   app.myPortfolio = new Portfolio();
   app.rivals = RIVAL_NAMES.map(name => new Rival(name));
   app.selectedSymbol = STOCK_CATALOG[0].symbol;
+  app.tickMs = 1000;
+  app.speedIndex = 0;
 }
 
 function showToast(message, type = "info") {
@@ -701,7 +747,6 @@ function openModal(mode) {
   const sym = app.selectedSymbol;
   const sm = app.market.symbols[sym];
   const h = app.myPortfolio.getHolding(sym);
-
   const xprice = execPrice(sm.price, mode);
   const maxQty = mode === "BUY"
     ? Math.max(0, Math.floor(app.myPortfolio.cash / (xprice * (1 + FEE_RATE))))
@@ -716,7 +761,6 @@ function openModal(mode) {
   $("#tradeQtyInput").setAttribute("max", maxQty);
   $("#tradeModal").classList.remove("hidden");
 }
-
 function closeModal() {
   $("#tradeModal").classList.add("hidden");
 }
@@ -732,7 +776,6 @@ function executeTrade(side, qty) {
     showToast("수량은 1 이상 정수여야 함", "error");
     return false;
   }
-
   if (sm.isHalted(market.tick)) {
     showToast("거래정지 상태라 거래할 수 없음", "error");
     return false;
@@ -793,6 +836,8 @@ function renderHeadlines() {
   });
 
   $("#tickValue").textContent = app.market.tick;
+  $("#marketStatusText").textContent = app.running ? "실행 중" : "정지됨";
+
   const mood = REGIMES[app.market.regime];
   const badge = $("#marketMoodBadge");
   badge.textContent = `${mood.label} · ${mood.mood}`;
@@ -867,7 +912,7 @@ function renderRanking() {
       </div>
       <div class="rank-right">
         <div class="rank-asset">${fmtWon(row.total)}</div>
-        <div class="rank-tag">${row.isMe ? "내 계좌" : "라이벌 투자자"}</div>
+        <div class="rank-tag">${row.isMe ? "내 총자산" : "라이벌 총자산"}</div>
       </div>
     `;
     wrap.appendChild(card);
@@ -1007,6 +1052,76 @@ function renderAllocation() {
   });
 }
 
+function drawCandles(sm) {
+  const canvas = $("#candleCanvas");
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(300, Math.floor(rect.width));
+  const height = 320;
+
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const candles = sm.getCandleSeries().slice(-60);
+  if (!candles.length) return;
+
+  const padL = 12;
+  const padR = 12;
+  const padT = 12;
+  const padB = 24;
+  const chartW = width - padL - padR;
+  const chartH = height - padT - padB;
+
+  const highs = candles.map(c => c.high);
+  const lows = candles.map(c => c.low);
+  const maxP = Math.max(...highs);
+  const minP = Math.min(...lows);
+  const range = Math.max(1, maxP - minP);
+
+  ctx.strokeStyle = "rgba(255,255,255,.08)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    const y = padT + (chartH / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(width - padR, y);
+    ctx.stroke();
+  }
+
+  const slotW = chartW / candles.length;
+  const bodyW = Math.max(4, slotW * 0.55);
+
+  candles.forEach((c, i) => {
+    const x = padL + slotW * i + slotW / 2;
+    const yHigh = padT + (maxP - c.high) / range * chartH;
+    const yLow = padT + (maxP - c.low) / range * chartH;
+    const yOpen = padT + (maxP - c.open) / range * chartH;
+    const yClose = padT + (maxP - c.close) / range * chartH;
+
+    const up = c.close >= c.open;
+    ctx.strokeStyle = up ? "#ff5a7a" : "#56a2ff";
+    ctx.fillStyle = up ? "#ff5a7a" : "#56a2ff";
+
+    ctx.beginPath();
+    ctx.moveTo(x, yHigh);
+    ctx.lineTo(x, yLow);
+    ctx.stroke();
+
+    const bodyY = Math.min(yOpen, yClose);
+    const bodyH = Math.max(2, Math.abs(yClose - yOpen));
+    ctx.fillRect(x - bodyW / 2, bodyY, bodyW, bodyH);
+  });
+
+  ctx.fillStyle = "rgba(203,213,225,.9)";
+  ctx.font = "12px Inter";
+  ctx.fillText(fmtWon(maxP), padL, 12);
+  ctx.fillText(fmtWon(minP), padL, height - 8);
+}
+
 function renderSelectedPanel() {
   const sym = app.selectedSymbol;
   const sm = app.market.symbols[sym];
@@ -1055,6 +1170,7 @@ function renderSelectedPanel() {
   $("#investorBox").textContent = formatInvestorSummary(sm);
 
   renderAllocation();
+  drawCandles(sm);
 }
 
 function renderSymbolOptions() {
@@ -1075,6 +1191,7 @@ function renderAll() {
   renderRanking();
   renderStocks();
   renderSelectedPanel();
+  $("#speedBtn").textContent = `속도 x${app.tickMs === 1000 ? 1 : app.tickMs === 500 ? 2 : 4}`;
 }
 
 function tickLoop() {
@@ -1083,6 +1200,11 @@ function tickLoop() {
   app.rivals.forEach(r => r.step(app.market));
   saveState();
   renderAll();
+}
+
+function restartLoop() {
+  if (app.timerId) clearInterval(app.timerId);
+  app.timerId = setInterval(tickLoop, app.tickMs);
 }
 
 function bindEvents() {
@@ -1130,6 +1252,16 @@ function bindEvents() {
     app.running = !app.running;
     $("#pauseBtn").textContent = app.running ? "일시정지" : "재개";
     showToast(app.running ? "시뮬레이션 재개" : "시뮬레이션 일시정지", "info");
+    renderHeadlines();
+  });
+
+  $("#speedBtn").addEventListener("click", () => {
+    app.speedIndex = (app.speedIndex + 1) % app.speedModes.length;
+    app.tickMs = app.speedModes[app.speedIndex];
+    restartLoop();
+    saveState();
+    renderAll();
+    showToast(`속도 변경 · x${app.tickMs === 1000 ? 1 : app.tickMs === 500 ? 2 : 4}`, "info");
   });
 
   $("#resetBtn").addEventListener("click", () => {
@@ -1140,6 +1272,7 @@ function bindEvents() {
     renderSymbolOptions();
     renderAll();
     saveState();
+    restartLoop();
     showToast("초기화 완료", "success");
   });
 
@@ -1150,6 +1283,10 @@ function bindEvents() {
     renderAll();
     showToast(`긴급 지원금 ${fmtWon(RESCUE_CASH)} 지급`, "success");
   });
+
+  window.addEventListener("resize", () => {
+    renderSelectedPanel();
+  });
 }
 
 function init() {
@@ -1158,9 +1295,7 @@ function init() {
   renderSymbolOptions();
   bindEvents();
   renderAll();
-
-  if (app.timerId) clearInterval(app.timerId);
-  app.timerId = setInterval(tickLoop, SIM_TICK_SECONDS * 1000);
+  restartLoop();
 }
 
 init();
