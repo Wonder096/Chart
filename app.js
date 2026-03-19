@@ -13,13 +13,13 @@ const HALT_TICKS = 25;
 const HISTORY_LEN = 240;
 const TAPE_LEN = 20;
 const INVESTOR_HISTORY_LEN = 7;
-const CANDLE_LIMIT = 120;
+const CANDLE_LIMIT = 140;
 const TICKS_PER_CANDLE = 5;
 
 const FEE_RATE = 0.001;
 const SLIPPAGE_RATE = 0.0006;
 
-const STORAGE_KEY = "k_mock_stock_pro_v2";
+const STORAGE_KEY = "k_mock_stock_pro_v3";
 
 const REGIMES = {
   CALM: { label: "보합권", move: 0.010, eventMul: 0.95, bias: 0.0000, mood: "📍 보합 흐름", cls: "calm" },
@@ -41,6 +41,8 @@ const STOCK_CATALOG = [
 ];
 
 const RIVAL_NAMES = ["레드펀드", "블루캐피탈", "알파투자", "스카이자산", "넥스트홀딩스", "골든리버", "노바트레이드"];
+
+const SPEED_MODES = [1000, 500, 250, 167, 125, 100];
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -120,6 +122,27 @@ function todayLabel(offset = 0) {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${mm}.${dd}`;
+}
+function average(arr) {
+  if (!arr.length) return 0;
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+function calcMA(candles, period) {
+  const out = [];
+  for (let i = 0; i < candles.length; i++) {
+    if (i + 1 < period) {
+      out.push(null);
+      continue;
+    }
+    const slice = candles.slice(i + 1 - period, i + 1);
+    out.push(average(slice.map(c => c.close)));
+  }
+  return out;
+}
+function newsTagType(text) {
+  if (text.includes("호재") || text.includes("급등") || text.includes("고래매수") || text.includes("실적 상향")) return "good";
+  if (text.includes("악재") || text.includes("급락") || text.includes("하한가") || text.includes("거래정지") || text.includes("고래매도")) return "bad";
+  return "event";
 }
 
 class Holding {
@@ -257,7 +280,7 @@ class SymbolMarket {
 
   seedCandles() {
     let p = this.price;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 40; i++) {
       const o = p;
       const c = clampPrice(o * (1 + rand(-0.03, 0.03)));
       const h = Math.max(o, c) * (1 + rand(0.001, 0.02));
@@ -510,7 +533,7 @@ class Market {
       if (!sm.news && Math.random() < NEWS_CHANCE_PER_TICK * eventMul) {
         sm.rollNews(this.tick);
         this.newsFeed.unshift(`📰 ${sm.name} — ${sm.news.title}: ${sm.news.text}`);
-        this.newsFeed = this.newsFeed.slice(0, 5);
+        this.newsFeed = this.newsFeed.slice(0, 6);
       }
 
       if (sm.isHalted(this.tick)) {
@@ -554,7 +577,7 @@ class Market {
         sm.limitState = "NORMAL";
       }
 
-      this.eventFeed = this.eventFeed.slice(0, 5);
+      this.eventFeed = this.eventFeed.slice(0, 6);
 
       sm.dayHigh = Math.max(sm.dayHigh, sm.price);
       sm.dayLow = Math.min(sm.dayLow, sm.price);
@@ -568,7 +591,7 @@ class Market {
 
       if (didShock && Math.abs(move * 100) >= 8) {
         this.eventFeed.unshift(`${move >= 0 ? "🔴 급등" : "🔵 급락"} ${sm.name} ${fmtPct(move * 100)}`);
-        this.eventFeed = this.eventFeed.slice(0, 5);
+        this.eventFeed = this.eventFeed.slice(0, 6);
       }
     }
   }
@@ -685,7 +708,7 @@ const app = {
   tradeMode: "BUY",
   tickMs: 1000,
   speedIndex: 0,
-  speedModes: [1000, 500, 250]
+  chartHoverIndex: null
 };
 
 function currentPrices(market) {
@@ -729,7 +752,7 @@ function createFreshState() {
   app.myPortfolio = new Portfolio();
   app.rivals = RIVAL_NAMES.map(name => new Rival(name));
   app.selectedSymbol = STOCK_CATALOG[0].symbol;
-  app.tickMs = 1000;
+  app.tickMs = SPEED_MODES[0];
   app.speedIndex = 0;
 }
 
@@ -763,6 +786,73 @@ function openModal(mode) {
 }
 function closeModal() {
   $("#tradeModal").classList.add("hidden");
+}
+
+function openDetailModal(sym) {
+  const sm = app.market.symbols[sym];
+  const d = sm.lastDeltaPct * 100;
+  const halted = sm.isHalted(app.market.tick);
+  const cls = moveClass(d, halted, sm.limitState);
+  const candles = sm.getCandleSeries().slice(-6);
+  const ma5 = calcMA(sm.getCandleSeries(), 5).at(-1);
+  const ma20 = calcMA(sm.getCandleSeries(), 20).at(-1);
+  const ma60 = calcMA(sm.getCandleSeries(), 60).at(-1);
+
+  $("#detailTitle").textContent = `${sm.name} (${sm.symbol})`;
+  $("#detailPrice").textContent = fmtWon(sm.price);
+  $("#detailChange").textContent = `${fmtPct(d)} · ${trendWord(d, halted, sm.limitState)}`;
+  $("#detailChange").className = `detail-change ${cls}`;
+
+  const state = $("#detailState");
+  state.textContent = trendWord(d, halted, sm.limitState);
+  state.className = `selected-state ${cls}`;
+
+  $("#detailInfo").innerHTML =
+    `업종 <strong>${sm.sector}</strong><br>` +
+    `테마 <strong>${sm.theme}</strong><br>` +
+    `${sm.desc}`;
+
+  $("#detailPriceInfo").innerHTML =
+    `전일 종가 <strong>${fmtWon(sm.prevClose)}</strong><br>` +
+    `시가 ${fmtWon(sm.dayOpen)}<br>` +
+    `고가 ${fmtWon(sm.dayHigh)}<br>` +
+    `저가 ${fmtWon(sm.dayLow)}<br>` +
+    `상한가 ${fmtWon(sm.limitUpPrice())}<br>` +
+    `하한가 ${fmtWon(sm.limitDownPrice())}<br>` +
+    `거래량 ${fmtNum(sm.dayVolume)}주`;
+
+  $("#detailNews").innerHTML =
+    sm.activeNewsText(app.market.tick) === "없음"
+      ? `현재 활성 뉴스 없음<br><br>최근 시장 이벤트를 참고하면 됨`
+      : sm.activeNewsText(app.market.tick).replace(/\n/g, "<br>");
+
+  $("#detailTech").innerHTML =
+    `변동성 <strong>${sm.volatilityPct().toFixed(2)}%</strong><br>` +
+    `MA5 ${ma5 ? fmtWon(ma5) : "-"}<br>` +
+    `MA20 ${ma20 ? fmtWon(ma20) : "-"}<br>` +
+    `MA60 ${ma60 ? fmtWon(ma60) : "-"}<br>` +
+    `스파크라인 ${sparkline(sm.history.slice(-24))}`;
+
+  const candleBox = $("#detailCandles");
+  candleBox.innerHTML = "";
+  candles.forEach((c, idx) => {
+    const div = document.createElement("div");
+    div.className = "candle-mini";
+    div.innerHTML =
+      `<strong>${idx + 1}번째 최근봉</strong><br>` +
+      `시가 ${fmtWon(c.open)}<br>` +
+      `고가 ${fmtWon(c.high)}<br>` +
+      `저가 ${fmtWon(c.low)}<br>` +
+      `종가 ${fmtWon(c.close)}<br>` +
+      `거래량 ${fmtNum(c.volume)}`;
+    candleBox.appendChild(div);
+  });
+
+  $("#detailModal").classList.remove("hidden");
+}
+
+function closeDetailModal() {
+  $("#detailModal").classList.add("hidden");
 }
 
 function executeTrade(side, qty) {
@@ -818,21 +908,23 @@ function executeTrade(side, qty) {
 }
 
 function renderHeadlines() {
-  const list = $("#headlineList");
-  list.innerHTML = "";
-
   const rows = [
-    ...app.market.newsFeed.slice(0, 2),
-    ...app.market.eventFeed.slice(0, 2)
+    ...app.market.newsFeed.slice(0, 3),
+    ...app.market.eventFeed.slice(0, 3)
   ];
 
-  if (rows.length === 0) rows.push("📰 현재 표시할 속보가 없음");
+  $("#headlineTicker").textContent = rows[0] || "📰 현재 표시할 속보가 없음";
 
-  rows.forEach(text => {
+  const cards = $("#headlineCards");
+  cards.innerHTML = "";
+  (rows.length ? rows : ["📰 현재 표시할 속보가 없음"]).slice(0, 4).forEach(text => {
     const div = document.createElement("div");
-    div.className = "headline-item";
-    div.textContent = text;
-    list.appendChild(div);
+    div.className = "headline-card";
+    div.innerHTML = `
+      <div class="tag ${newsTagType(text)}">${newsTagType(text) === "good" ? "호재" : newsTagType(text) === "bad" ? "주의" : "이벤트"}</div>
+      <div class="title">${text}</div>
+    `;
+    cards.appendChild(div);
   });
 
   $("#tickValue").textContent = app.market.tick;
@@ -945,14 +1037,29 @@ function renderStocks() {
         ${row.desc}
       </div>
       <div class="stock-spark">${sparkline(row.history)}</div>
+      <div class="stock-actions">
+        <button class="tiny-btn detail-open-btn" data-sym="${row.sym}">상세보기</button>
+        <button class="tiny-btn pick-btn" data-sym="${row.sym}">선택</button>
+      </div>
     `;
-    card.addEventListener("click", () => {
-      app.selectedSymbol = row.sym;
-      $("#symbolSelect").value = row.sym;
+    grid.appendChild(card);
+  });
+
+  grid.querySelectorAll(".detail-open-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      openDetailModal(e.currentTarget.dataset.sym);
+    });
+  });
+
+  grid.querySelectorAll(".pick-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      const sym = e.currentTarget.dataset.sym;
+      app.selectedSymbol = sym;
+      $("#symbolSelect").value = sym;
       saveState();
       renderSelectedPanel();
+      showToast(`${app.market.symbols[sym].name} 선택됨`, "info");
     });
-    grid.appendChild(card);
   });
 }
 
@@ -1054,10 +1161,11 @@ function renderAllocation() {
 
 function drawCandles(sm) {
   const canvas = $("#candleCanvas");
+  const tooltip = $("#chartTooltip");
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
-  const width = Math.max(300, Math.floor(rect.width));
-  const height = 320;
+  const width = Math.max(320, Math.floor(rect.width));
+  const height = 360;
 
   canvas.width = width * dpr;
   canvas.height = height * dpr;
@@ -1069,12 +1177,19 @@ function drawCandles(sm) {
   const candles = sm.getCandleSeries().slice(-60);
   if (!candles.length) return;
 
+  const ma5 = calcMA(candles, 5);
+  const ma20 = calcMA(candles, 20);
+  const ma60 = calcMA(candles, 60);
+
   const padL = 12;
-  const padR = 12;
+  const padR = 56;
   const padT = 12;
-  const padB = 24;
+  const volH = 68;
+  const gap = 10;
+  const padB = 20;
+  const priceChartH = height - padT - padB - volH - gap;
+  const volTop = padT + priceChartH + gap;
   const chartW = width - padL - padR;
-  const chartH = height - padT - padB;
 
   const highs = candles.map(c => c.high);
   const lows = candles.map(c => c.low);
@@ -1082,29 +1197,72 @@ function drawCandles(sm) {
   const minP = Math.min(...lows);
   const range = Math.max(1, maxP - minP);
 
-  ctx.strokeStyle = "rgba(255,255,255,.08)";
+  const maxVol = Math.max(...candles.map(c => c.volume), 1);
+
+  ctx.strokeStyle = "rgba(255,255,255,.06)";
   ctx.lineWidth = 1;
+
   for (let i = 0; i < 5; i++) {
-    const y = padT + (chartH / 4) * i;
+    const y = padT + (priceChartH / 4) * i;
     ctx.beginPath();
     ctx.moveTo(padL, y);
     ctx.lineTo(width - padR, y);
     ctx.stroke();
+
+    const priceLabel = maxP - (range / 4) * i;
+    ctx.fillStyle = "rgba(203,213,225,.82)";
+    ctx.font = "11px Inter";
+    ctx.fillText(fmtNum(priceLabel), width - padR + 6, y + 4);
   }
 
+  ctx.beginPath();
+  ctx.moveTo(padL, volTop);
+  ctx.lineTo(width - padR, volTop);
+  ctx.stroke();
+
   const slotW = chartW / candles.length;
-  const bodyW = Math.max(4, slotW * 0.55);
+  const bodyW = Math.max(4, slotW * 0.56);
+
+  function py(price) {
+    return padT + ((maxP - price) / range) * priceChartH;
+  }
+
+  function drawLine(values, color) {
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.6;
+    let started = false;
+    values.forEach((v, i) => {
+      if (v == null) return;
+      const x = padL + slotW * i + slotW / 2;
+      const y = py(v);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.stroke();
+  }
+
+  drawLine(ma5, "#f59e0b");
+  drawLine(ma20, "#10b981");
+  drawLine(ma60, "#8b5cf6");
 
   candles.forEach((c, i) => {
     const x = padL + slotW * i + slotW / 2;
-    const yHigh = padT + (maxP - c.high) / range * chartH;
-    const yLow = padT + (maxP - c.low) / range * chartH;
-    const yOpen = padT + (maxP - c.open) / range * chartH;
-    const yClose = padT + (maxP - c.close) / range * chartH;
+    const yHigh = py(c.high);
+    const yLow = py(c.low);
+    const yOpen = py(c.open);
+    const yClose = py(c.close);
 
     const up = c.close >= c.open;
-    ctx.strokeStyle = up ? "#ff5a7a" : "#56a2ff";
-    ctx.fillStyle = up ? "#ff5a7a" : "#56a2ff";
+    const color = up ? "#ff5a7a" : "#56a2ff";
+
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1.2;
 
     ctx.beginPath();
     ctx.moveTo(x, yHigh);
@@ -1114,12 +1272,40 @@ function drawCandles(sm) {
     const bodyY = Math.min(yOpen, yClose);
     const bodyH = Math.max(2, Math.abs(yClose - yOpen));
     ctx.fillRect(x - bodyW / 2, bodyY, bodyW, bodyH);
+
+    const volBarH = (c.volume / maxVol) * (volH - 10);
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(x - bodyW / 2, volTop + (volH - volBarH), bodyW, volBarH);
+    ctx.globalAlpha = 1;
   });
 
-  ctx.fillStyle = "rgba(203,213,225,.9)";
-  ctx.font = "12px Inter";
-  ctx.fillText(fmtWon(maxP), padL, 12);
-  ctx.fillText(fmtWon(minP), padL, height - 8);
+  if (app.chartHoverIndex != null) {
+    const i = Math.max(0, Math.min(candles.length - 1, app.chartHoverIndex));
+    const c = candles[i];
+    const x = padL + slotW * i + slotW / 2;
+
+    ctx.strokeStyle = "rgba(255,255,255,.22)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, padT);
+    ctx.lineTo(x, volTop + volH);
+    ctx.stroke();
+
+    tooltip.classList.remove("hidden");
+    tooltip.innerHTML =
+      `시가 ${fmtWon(c.open)}<br>` +
+      `고가 ${fmtWon(c.high)}<br>` +
+      `저가 ${fmtWon(c.low)}<br>` +
+      `종가 ${fmtWon(c.close)}<br>` +
+      `거래량 ${fmtNum(c.volume)}`;
+    const canvasBox = canvas.getBoundingClientRect();
+    let left = canvasBox.left + x + 12;
+    let top = canvasBox.top + 20;
+    tooltip.style.left = `${Math.min(window.innerWidth - 180, left)}px`;
+    tooltip.style.top = `${top}px`;
+  } else {
+    tooltip.classList.add("hidden");
+  }
 }
 
 function renderSelectedPanel() {
@@ -1191,7 +1377,7 @@ function renderAll() {
   renderRanking();
   renderStocks();
   renderSelectedPanel();
-  $("#speedBtn").textContent = `속도 x${app.tickMs === 1000 ? 1 : app.tickMs === 500 ? 2 : 4}`;
+  $("#speedBtn").textContent = `속도 x${Math.round(1000 / app.tickMs)}`;
 }
 
 function tickLoop() {
@@ -1210,6 +1396,7 @@ function restartLoop() {
 function bindEvents() {
   $("#symbolSelect").addEventListener("change", (e) => {
     app.selectedSymbol = e.target.value;
+    app.chartHoverIndex = null;
     saveState();
     renderSelectedPanel();
   });
@@ -1248,6 +1435,11 @@ function bindEvents() {
     if (e.target.dataset.close === "true") closeModal();
   });
 
+  $("#detailCloseBtn").addEventListener("click", closeDetailModal);
+  $("#detailModal").addEventListener("click", (e) => {
+    if (e.target.dataset.closeDetail === "true") closeDetailModal();
+  });
+
   $("#pauseBtn").addEventListener("click", () => {
     app.running = !app.running;
     $("#pauseBtn").textContent = app.running ? "일시정지" : "재개";
@@ -1256,12 +1448,12 @@ function bindEvents() {
   });
 
   $("#speedBtn").addEventListener("click", () => {
-    app.speedIndex = (app.speedIndex + 1) % app.speedModes.length;
-    app.tickMs = app.speedModes[app.speedIndex];
+    app.speedIndex = (app.speedIndex + 1) % SPEED_MODES.length;
+    app.tickMs = SPEED_MODES[app.speedIndex];
     restartLoop();
     saveState();
     renderAll();
-    showToast(`속도 변경 · x${app.tickMs === 1000 ? 1 : app.tickMs === 500 ? 2 : 4}`, "info");
+    showToast(`속도 변경 · x${Math.round(1000 / app.tickMs)}`, "info");
   });
 
   $("#resetBtn").addEventListener("click", () => {
@@ -1282,6 +1474,32 @@ function bindEvents() {
     saveState();
     renderAll();
     showToast(`긴급 지원금 ${fmtWon(RESCUE_CASH)} 지급`, "success");
+  });
+
+  const canvas = $("#candleCanvas");
+  canvas.addEventListener("mousemove", (e) => {
+    const sm = app.market.symbols[app.selectedSymbol];
+    const candles = sm.getCandleSeries().slice(-60);
+    if (!candles.length) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width;
+    const padL = 12;
+    const padR = 56;
+    const chartW = width - padL - padR;
+    const slotW = chartW / candles.length;
+    const x = e.clientX - rect.left;
+    const idx = Math.floor((x - padL) / slotW);
+    if (idx >= 0 && idx < candles.length) {
+      app.chartHoverIndex = idx;
+      drawCandles(sm);
+    }
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    app.chartHoverIndex = null;
+    $("#chartTooltip").classList.add("hidden");
+    drawCandles(app.market.symbols[app.selectedSymbol]);
   });
 
   window.addEventListener("resize", () => {
