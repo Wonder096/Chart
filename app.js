@@ -1,7 +1,7 @@
-const STORAGE_KEY = "k_mock_trading_pro_v5_fixed";
+const STORAGE_KEY = "k_mock_trading_pro_v6_ui_news";
 const INITIAL_CASH = 10000000;
 const SUPPORT_FUND = 1000000;
-const NEWS_LIMIT = 80;
+const NEWS_LIMIT = 100;
 const ORDER_LIMIT = 160;
 const ALERT_LIMIT = 160;
 const CANVAS_W = 1280;
@@ -26,25 +26,29 @@ const breakingTemplates = [
   "{name}, 장중 수급 집중되며 변동성 확대",
   "{name}, 외국인 매수세 유입 추정",
   "{name}, 개인 투자자 관심 급증",
-  "{name}, 시세 급등 속 거래량 폭증"
+  "{name}, 시세 급등 속 거래량 폭증",
+  "{name}, 테마 확산 기대감 속 시장 주목"
 ];
 const goodTemplates = [
   "{name}, 신규 계약 기대감으로 투자심리 개선",
   "{name}, 실적 기대감 반영되며 상승 탄력 강화",
   "{name}, 업황 개선 수혜 기대감 부각",
-  "{name}, 차세대 사업 확장 기대"
+  "{name}, 차세대 사업 확장 기대",
+  "{name}, 기관 수급 개선 기대감 반영"
 ];
 const warnTemplates = [
   "{name}, 단기 급등에 따른 차익실현 매물 주의",
   "{name}, 변동성 확대 구간 진입",
   "{name}, 급등 이후 추격 매수 주의보",
-  "{name}, 고점 부근 매물 압박 가능성"
+  "{name}, 고점 부근 매물 압박 가능성",
+  "{name}, 장중 흔들림 확대 가능성 유의"
 ];
 const eventTemplates = [
   "{name}, 장 마감 브리핑 관심 종목 선정",
   "{name}, 투자자 토론방 언급량 급증",
   "{name}, 테마 이벤트 발생으로 관심 확대",
-  "{name}, 당일 관심 검색어 상위권 진입"
+  "{name}, 당일 관심 검색어 상위권 진입",
+  "{name}, 시장 리포트 상위 조회 종목 편입"
 ];
 
 const state = {
@@ -100,6 +104,12 @@ function nowTime() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
 }
+function typeLabel(type) {
+  if (type === "breaking") return "속보";
+  if (type === "good") return "호재";
+  if (type === "warn") return "주의";
+  return "이벤트";
+}
 
 function generateCandles(base) {
   const candles = [];
@@ -154,10 +164,7 @@ function generateOrderbook(stock) {
 }
 
 function buildInitialState() {
-  state.portfolio = {
-    cash: INITIAL_CASH,
-    holdings: {}
-  };
+  state.portfolio = { cash: INITIAL_CASH, holdings: {} };
   state.favorites = [];
   state.news = [];
   state.alerts = [];
@@ -214,8 +221,7 @@ function sanitizeLoadedState(raw) {
   state.isPaused = !!raw.isPaused;
   state.isStopped = !!raw.isStopped;
   state.portfolio = raw.portfolio && typeof raw.portfolio === "object" ? raw.portfolio : { cash: INITIAL_CASH, holdings: {} };
-  if (!Number.isFinite(state.portfolio.cash)) state.portfolio.cash = INITIAL_CASH;
-  if (state.portfolio.cash <= 0) state.portfolio.cash = INITIAL_CASH;
+  if (!Number.isFinite(state.portfolio.cash) || state.portfolio.cash <= 0) state.portfolio.cash = INITIAL_CASH;
   if (!state.portfolio.holdings || typeof state.portfolio.holdings !== "object") state.portfolio.holdings = {};
 
   state.stocks = raw.stocks.map(s => {
@@ -308,12 +314,6 @@ function getProfitLoss() {
 function getProfitRate() {
   return ((getTotalAsset() - INITIAL_CASH) / INITIAL_CASH) * 100;
 }
-function typeLabel(type) {
-  if (type === "breaking") return "속보";
-  if (type === "good") return "호재";
-  if (type === "warn") return "주의";
-  return "이벤트";
-}
 
 function addNews(type, stock, title, desc) {
   state.news.unshift({
@@ -370,7 +370,7 @@ function createRandomNews(stock) {
 }
 
 function seedInitialNews() {
-  const shuffled = [...STOCK_SEED].sort(() => Math.random() - 0.5).slice(0, 8);
+  const shuffled = [...STOCK_SEED].sort(() => Math.random() - 0.5).slice(0, 10);
   shuffled.forEach(seed => {
     const stock = state.stocks.find(s => s.code === seed.code);
     if (stock) createRandomNews(stock);
@@ -739,6 +739,43 @@ function renderPortfolio() {
   els.portfolioRate.className = rate >= 0 ? "positive" : "negative";
 }
 
+function buildWatchItem(stock, compact = false) {
+  const rate = getStockRate(stock);
+  const diff = stock.currentPrice - stock.prevClose;
+  const isActive = stock.code === state.selectedCode;
+  const isFav = state.favorites.includes(stock.code);
+  const maxVolume = Math.max(...state.stocks.map(s => s.currentVolume), 1);
+  const volumePct = (stock.currentVolume / maxVolume) * 100;
+
+  return `
+    <div class="watch-item ${isActive ? "active" : ""}" data-code="${stock.code}">
+      <div class="watch-top">
+        <div class="watch-left">
+          <div class="watch-logo">${stock.logo}</div>
+          <div class="watch-name-wrap">
+            <div class="watch-name-row">
+              <div class="watch-name">${stock.name}</div>
+              <span class="watch-fav-star">${isFav ? "★" : "☆"}</span>
+            </div>
+            <div class="watch-code">${compact ? stock.code : `${stock.code} · ${stock.theme}`}</div>
+          </div>
+        </div>
+        <div class="watch-right">
+          <div class="watch-price">${formatKRW(stock.currentPrice)}</div>
+          <div class="watch-change ${rate >= 0 ? "positive" : "negative"}">
+            ${compact ? formatSignedPct(rate) : `${formatSignedKRW(diff)} (${formatSignedPct(rate)})`}
+          </div>
+        </div>
+      </div>
+      ${compact ? "" : `
+      <div class="watch-bottom">
+        <div class="volume-bar"><div class="volume-fill" style="width:${volumePct}%"></div></div>
+        <div class="watch-mini">거래량 ${formatVolume(stock.currentVolume)}</div>
+      </div>`}
+    </div>
+  `;
+}
+
 function renderFavorites() {
   const favorites = state.favorites
     .map(code => state.stocks.find(s => s.code === code))
@@ -751,26 +788,7 @@ function renderFavorites() {
   }
 
   els.favoritesList.className = "watchlist-block";
-  els.favoritesList.innerHTML = favorites.map(stock => {
-    const rate = getStockRate(stock);
-    return `
-      <div class="watch-item ${stock.code === state.selectedCode ? "active" : ""}" data-code="${stock.code}">
-        <div class="watch-top">
-          <div class="watch-left">
-            <div class="watch-logo">${stock.logo}</div>
-            <div class="watch-name-wrap">
-              <div class="watch-name">${stock.name}</div>
-              <div class="watch-code">${stock.code}</div>
-            </div>
-          </div>
-          <div class="watch-right">
-            <div class="watch-price">${formatKRW(stock.currentPrice)}</div>
-            <div class="watch-change ${rate >= 0 ? "positive" : "negative"}">${formatSignedPct(rate)}</div>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join("");
+  els.favoritesList.innerHTML = favorites.map(stock => buildWatchItem(stock, true)).join("");
 }
 
 function renderWatchlist() {
@@ -789,39 +807,7 @@ function renderWatchlist() {
     list.sort((a, b) => b.currentVolume - a.currentVolume);
   }
 
-  const maxVolume = Math.max(...list.map(s => s.currentVolume), 1);
-
-  els.watchlist.innerHTML = list.map(stock => {
-    const rate = getStockRate(stock);
-    const diff = stock.currentPrice - stock.prevClose;
-    const isActive = stock.code === state.selectedCode;
-    const volumePct = (stock.currentVolume / maxVolume) * 100;
-
-    return `
-      <div class="watch-item ${isActive ? "active" : ""}" data-code="${stock.code}">
-        <div class="watch-top">
-          <div class="watch-left">
-            <div class="watch-logo">${stock.logo}</div>
-            <div class="watch-name-wrap">
-              <div class="watch-name">${stock.name}</div>
-              <div class="watch-code">${stock.code} · ${stock.theme}</div>
-            </div>
-          </div>
-          <div class="watch-right">
-            <div class="watch-price">${formatKRW(stock.currentPrice)}</div>
-            <div class="watch-change ${rate >= 0 ? "positive" : "negative"}">
-              ${formatSignedKRW(diff)} (${formatSignedPct(rate)})
-            </div>
-          </div>
-        </div>
-        <div class="watch-bottom">
-          <div class="volume-bar"><div class="volume-fill" style="width:${volumePct}%"></div></div>
-          <div class="watch-mini">거래량 ${formatVolume(stock.currentVolume)}</div>
-        </div>
-      </div>
-    `;
-  }).join("");
-
+  els.watchlist.innerHTML = list.map(stock => buildWatchItem(stock, false)).join("");
   renderFavorites();
   els.marketAlertBadge.textContent = String(state.marketAlertCount);
 }
@@ -849,6 +835,30 @@ function renderNews() {
     </div>
   `).join("");
   els.newsCountChip.textContent = `${state.news.length}건`;
+}
+
+function renderSelectedStockNews() {
+  const stock = getSelectedStock();
+  const filtered = state.news.filter(n => n.code === stock.code).slice(0, 8);
+
+  els.selectedNewsTitleName.textContent = stock.name;
+  els.selectedNewsCount.textContent = `${filtered.length}건`;
+
+  if (!filtered.length) {
+    els.selectedNewsFeed.innerHTML = `<div class="empty-state-box">현재 선택 종목의 뉴스/이벤트가 아직 없다</div>`;
+    return;
+  }
+
+  els.selectedNewsFeed.innerHTML = filtered.map(item => `
+    <div class="news-card">
+      <div class="news-top">
+        <span class="news-type ${item.type}">${typeLabel(item.type)}</span>
+        <span class="news-time">${item.time}</span>
+      </div>
+      <div class="news-title">${item.title}</div>
+      <div class="news-desc">${item.desc}</div>
+    </div>
+  `).join("");
 }
 
 function renderHistory() {
@@ -907,6 +917,7 @@ function renderAll() {
   renderWatchlist();
   renderOrderbook();
   renderNews();
+  renderSelectedStockNews();
   renderHistory();
   drawChart();
   updateSpeedButtons();
@@ -1075,7 +1086,8 @@ function cacheElements() {
     "buyModeBtn","sellModeBtn","orderPrice","orderQty","quickRow","estimatedCost","estimatedFee","submitOrderBtn",
     "orderbookRows","newsFeed","newsCountChip","orderHistoryList","alertHistoryList","clearHistoryBtn",
     "portfolioTotal","portfolioPL","portfolioCash","portfolioStockValue","portfolioInvested","portfolioRate",
-    "favoritesList","marketAlertBadge","watchlist","searchInput"
+    "favoritesList","marketAlertBadge","watchlist","searchInput",
+    "selectedNewsTitleName","selectedNewsCount","selectedNewsFeed"
   ].forEach(id => {
     els[id] = document.getElementById(id);
   });
