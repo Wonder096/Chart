@@ -1,9 +1,11 @@
-const STORAGE_KEY = "k_mock_trading_pro_v2";
+const STORAGE_KEY = "k_mock_trading_pro_v3_design";
+const INITIAL_CASH = 10000000;
+const SUPPORT_FUND = 1000000;
 const NEWS_LIMIT = 80;
 const ORDER_LIMIT = 160;
 const ALERT_LIMIT = 160;
-const CANVAS_W = 1200;
-const CANVAS_H = 650;
+const CANVAS_W = 1280;
+const CANVAS_H = 700;
 
 const STOCK_SEED = [
   { code: "KQ001", name: "한강테크", logo: "한", base: 48200, shares: 4200000, theme: "AI 반도체" },
@@ -74,13 +76,15 @@ const state = {
   hoverIndex: -1,
   alertCount: 0,
   marketAlertCount: 0,
+  isPaused: false,
+  isStopped: false,
   stocks: [],
   favorites: [],
   news: [],
   alerts: [],
   orderHistory: [],
   portfolio: {
-    cash: 10000000,
+    cash: INITIAL_CASH,
     holdings: {}
   }
 };
@@ -120,7 +124,7 @@ function formatVolume(v) {
 
 function nowTime() {
   const d = new Date();
-  return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
 }
 
 function saveState() {
@@ -130,10 +134,12 @@ function saveState() {
     orderMode: state.orderMode,
     sortBy: state.sortBy,
     favorites: state.favorites,
-    portfolio: state.portfolio,
     news: state.news.slice(0, NEWS_LIMIT),
     alerts: state.alerts.slice(0, ALERT_LIMIT),
     orderHistory: state.orderHistory.slice(0, ORDER_LIMIT),
+    portfolio: state.portfolio,
+    isPaused: state.isPaused,
+    isStopped: state.isStopped,
     stocks: state.stocks.map(s => ({
       code: s.code,
       name: s.name,
@@ -153,6 +159,7 @@ function saveState() {
 function loadState() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return false;
+
   try {
     const saved = JSON.parse(raw);
     state.speed = saved.speed || 1;
@@ -160,26 +167,50 @@ function loadState() {
     state.orderMode = saved.orderMode || "buy";
     state.sortBy = saved.sortBy || "change";
     state.favorites = Array.isArray(saved.favorites) ? saved.favorites : [];
-    state.portfolio = saved.portfolio || { cash: 10000000, holdings: {} };
     state.news = Array.isArray(saved.news) ? saved.news : [];
     state.alerts = Array.isArray(saved.alerts) ? saved.alerts : [];
     state.orderHistory = Array.isArray(saved.orderHistory) ? saved.orderHistory : [];
+    state.isPaused = !!saved.isPaused;
+    state.isStopped = !!saved.isStopped;
+
+    if (saved.portfolio && typeof saved.portfolio.cash === "number") {
+      state.portfolio = saved.portfolio;
+    } else {
+      state.portfolio = { cash: INITIAL_CASH, holdings: {} };
+    }
+
+    if (!Number.isFinite(state.portfolio.cash) || state.portfolio.cash <= 0) {
+      state.portfolio.cash = INITIAL_CASH;
+    }
+
+    if (!state.portfolio.holdings || typeof state.portfolio.holdings !== "object") {
+      state.portfolio.holdings = {};
+    }
 
     if (Array.isArray(saved.stocks) && saved.stocks.length) {
-      state.stocks = saved.stocks.map(s => ({
-        ...s,
-        currentPrice: s.candles[s.candles.length - 1].close,
-        currentVolume: s.candles[s.candles.length - 1].volume,
-        dayHigh: Math.max(...s.candles.map(c => c.high)),
-        dayLow: Math.min(...s.candles.map(c => c.low)),
-        mood: 50 + randInt(-10, 10),
-        flashDirection: 0
-      }));
-      return true;
+      state.stocks = saved.stocks.map(s => {
+        const candles = Array.isArray(s.candles) && s.candles.length ? s.candles : [];
+        if (!candles.length) return null;
+        return {
+          ...s,
+          candles,
+          currentPrice: candles[candles.length - 1].close,
+          currentVolume: candles[candles.length - 1].volume,
+          dayHigh: Math.max(...candles.map(c => c.high)),
+          dayLow: Math.min(...candles.map(c => c.low)),
+          mood: 50 + randInt(-10, 10),
+          flashDirection: 0
+        };
+      }).filter(Boolean);
+
+      if (state.stocks.length) {
+        return true;
+      }
     }
   } catch (e) {
     console.error(e);
   }
+
   return false;
 }
 
@@ -187,7 +218,7 @@ function buildInitialStocks() {
   state.stocks = STOCK_SEED.map(seed => {
     const candles = [];
     let prev = seed.base * rand(0.92, 1.08);
-    const startPrevClose = prev;
+    const prevClose = prev;
 
     for (let i = 0; i < 120; i++) {
       const open = prev;
@@ -196,6 +227,7 @@ function buildInitialStocks() {
       const high = Math.max(open, close) * (1 + rand(0.001, 0.018));
       const low = Math.min(open, close) * (1 - rand(0.001, 0.018));
       const volume = randInt(8000, 200000) * (1 + Math.abs(move) * 25);
+
       candles.push({
         time: `T-${120 - i}`,
         open,
@@ -204,10 +236,12 @@ function buildInitialStocks() {
         close,
         volume
       });
+
       prev = close;
     }
 
     const currentPrice = candles[candles.length - 1].close;
+
     return {
       code: seed.code,
       name: seed.name,
@@ -217,7 +251,7 @@ function buildInitialStocks() {
       candles,
       currentPrice,
       currentVolume: candles[candles.length - 1].volume,
-      prevClose: startPrevClose,
+      prevClose,
       dayHigh: Math.max(...candles.map(c => c.high)),
       dayLow: Math.min(...candles.map(c => c.low)),
       volatility: rand(0.7, 1.6),
@@ -228,32 +262,33 @@ function buildInitialStocks() {
     };
   });
 
-  state.stocks.forEach(s => {
-    s.orderbook = generateOrderbook(s);
+  state.stocks.forEach(stock => {
+    stock.orderbook = generateOrderbook(stock);
   });
 }
 
 function generateOrderbook(stock) {
   const rows = [];
   const base = stock.currentPrice;
+
   for (let i = 10; i >= 1; i--) {
-    const price = Math.max(100, Math.round(base * (1 + i * 0.0022)));
     rows.push({
       side: "ask",
-      price,
+      price: Math.max(100, Math.round(base * (1 + i * 0.0022))),
       qty: randInt(40, 900),
       flash: 0
     });
   }
+
   for (let i = 1; i <= 10; i++) {
-    const price = Math.max(100, Math.round(base * (1 - i * 0.0022)));
     rows.push({
       side: "bid",
-      price,
+      price: Math.max(100, Math.round(base * (1 - i * 0.0022))),
       qty: randInt(40, 900),
       flash: 0
     });
   }
+
   return rows;
 }
 
@@ -277,8 +312,8 @@ function getStockValueOfHolding(code) {
 }
 
 function getInvestedAmount() {
-  return Object.entries(state.portfolio.holdings).reduce((sum, [code, h]) => {
-    return sum + (h.avgPrice * h.qty);
+  return Object.entries(state.portfolio.holdings).reduce((sum, [code, holding]) => {
+    return sum + (holding.avgPrice * holding.qty);
   }, 0);
 }
 
@@ -293,11 +328,11 @@ function getTotalAsset() {
 }
 
 function getProfitLoss() {
-  return getTotalAsset() - (10000000);
+  return getTotalAsset() - INITIAL_CASH;
 }
 
 function getProfitRate() {
-  return ((getTotalAsset() - 10000000) / 10000000) * 100;
+  return ((getTotalAsset() - INITIAL_CASH) / INITIAL_CASH) * 100;
 }
 
 function addNews(type, stock, title, desc) {
@@ -342,6 +377,13 @@ function addOrderHistory(type, stock, qty, price, amount, note) {
   state.orderHistory = state.orderHistory.slice(0, ORDER_LIMIT);
 }
 
+function typeLabel(type) {
+  if (type === "breaking") return "속보";
+  if (type === "good") return "호재";
+  if (type === "warn") return "주의";
+  return "이벤트";
+}
+
 function createRandomNews(stock) {
   const pool = [
     { type: "breaking", templates: breakingTemplates },
@@ -349,19 +391,14 @@ function createRandomNews(stock) {
     { type: "warn", templates: warnTemplates },
     { type: "event", templates: eventTemplates }
   ];
+
   const picked = pool[randInt(0, pool.length - 1)];
   const raw = picked.templates[randInt(0, picked.templates.length - 1)];
   const title = raw.replace("{name}", stock.name);
   const desc = `${stock.name} · ${stock.theme} 관련 흐름 속에서 현재 ${formatSignedPct(getStockRate(stock))} 변동 중. 체결 강도와 거래량 변화를 주시할 필요가 있다.`;
+
   addNews(picked.type, stock, title, desc);
   addAlert(`${stock.name} 관련 ${typeLabel(picked.type)} 발생`, stock, "alert");
-}
-
-function typeLabel(type) {
-  if (type === "breaking") return "속보";
-  if (type === "good") return "호재";
-  if (type === "warn") return "주의";
-  return "이벤트";
 }
 
 function maybeGenerateBurstNews(stock, tickFactor) {
@@ -375,8 +412,53 @@ function maybeGenerateBurstNews(stock, tickFactor) {
   }
 }
 
+function maybeGenerateLimitEvents(stock) {
+  const rate = getStockRate(stock);
+
+  if (rate >= 29.7 && Math.random() < 0.04) {
+    addNews("good", stock, `${stock.name}, 상한가 부근 진입`, `${stock.name}이 상한가 수준까지 접근했다. 강한 매수세가 이어지며 변동성이 매우 커진 상태다.`);
+    addAlert(`${stock.name} 상한가 부근 진입`, stock, "alert");
+  } else if (rate <= -29.7 && Math.random() < 0.04) {
+    addNews("warn", stock, `${stock.name}, 하한가 부근 급락`, `${stock.name}이 하한가 수준까지 밀렸다. 단기 반등 시도보다 변동성 관리가 우선인 구간이다.`);
+    addAlert(`${stock.name} 하한가 부근 급락`, stock, "alert");
+  } else if (Math.abs(rate) > 12 && Math.random() < 0.02) {
+    const positive = rate > 0;
+    addNews(
+      positive ? "breaking" : "warn",
+      stock,
+      `${stock.name}, ${positive ? "급등" : "급락"} 변동성 확대`,
+      `${stock.name}의 장중 변동률이 ${formatSignedPct(rate)}를 기록 중이다. 거래량 확대와 함께 단기 변동성이 매우 커진 상태다.`
+    );
+    addAlert(`${stock.name} ${positive ? "급등" : "급락"} 감지`, stock, "alert");
+  }
+}
+
+function updateOrderbook(stock) {
+  stock.orderbook.forEach(row => {
+    const oldQty = row.qty;
+    const move = randInt(-100, 140);
+    row.qty = clamp(oldQty + move, 20, 2000);
+    row.flash = row.qty > oldQty ? 1 : row.qty < oldQty ? -1 : 0;
+  });
+
+  const asks = stock.orderbook.filter(r => r.side === "ask");
+  const bids = stock.orderbook.filter(r => r.side === "bid");
+  const base = stock.currentPrice;
+
+  asks.forEach((row, idx) => {
+    row.price = Math.max(100, Math.round(base * (1 + (asks.length - idx) * 0.002)));
+  });
+
+  bids.forEach((row, idx) => {
+    row.price = Math.max(100, Math.round(base * (1 - (idx + 1) * 0.002)));
+  });
+}
+
 function simulateTick() {
+  if (state.isPaused || state.isStopped) return;
+
   const loops = state.speed;
+
   for (let loop = 0; loop < loops; loop++) {
     state.stocks.forEach(stock => {
       const last = stock.candles[stock.candles.length - 1];
@@ -390,11 +472,9 @@ function simulateTick() {
       const move = (rand(-0.018, 0.018) * stock.volatility) + drift + sentimentBoost;
       const open = last.close;
       let close = open * (1 + move);
-      close = Math.max(500, close);
 
-      const upperLimit = stock.prevClose * 1.30;
-      const lowerLimit = stock.prevClose * 0.70;
-      close = clamp(close, lowerLimit, upperLimit);
+      close = Math.max(500, close);
+      close = clamp(close, stock.prevClose * 0.70, stock.prevClose * 1.30);
 
       const high = Math.max(open, close) * (1 + rand(0.0005, 0.015));
       const low = Math.min(open, close) * (1 - rand(0.0005, 0.015));
@@ -431,45 +511,30 @@ function simulateTick() {
   saveState();
 }
 
-function maybeGenerateLimitEvents(stock) {
-  const rate = getStockRate(stock);
-  if (rate >= 29.7 && Math.random() < 0.04) {
-    addNews("good", stock, `${stock.name}, 상한가 부근 진입`, `${stock.name}이 상한가 수준까지 접근했다. 강한 매수세가 이어지며 변동성이 매우 커진 상태다.`);
-    addAlert(`${stock.name} 상한가 부근 진입`, stock, "alert");
-  } else if (rate <= -29.7 && Math.random() < 0.04) {
-    addNews("warn", stock, `${stock.name}, 하한가 부근 급락`, `${stock.name}이 하한가 수준까지 밀렸다. 단기 반등 시도보다 변동성 관리가 우선인 구간이다.`);
-    addAlert(`${stock.name} 하한가 부근 급락`, stock, "alert");
-  } else if (Math.abs(rate) > 12 && Math.random() < 0.02) {
-    const positive = rate > 0;
-    addNews(
-      positive ? "breaking" : "warn",
-      stock,
-      `${stock.name}, ${positive ? "급등" : "급락"} 변동성 확대`,
-      `${stock.name}의 장중 변동률이 ${formatSignedPct(rate)}를 기록 중이다. 거래량 확대와 함께 단기 변동성이 매우 커진 상태다.`
-    );
-    addAlert(`${stock.name} ${positive ? "급등" : "급락"} 감지`, stock, "alert");
+function compressCandles(candles, step) {
+  const result = [];
+  for (let i = 0; i < candles.length; i += step) {
+    const chunk = candles.slice(i, i + step);
+    if (!chunk.length) continue;
+    result.push({
+      time: chunk[chunk.length - 1].time,
+      open: chunk[0].open,
+      close: chunk[chunk.length - 1].close,
+      high: Math.max(...chunk.map(c => c.high)),
+      low: Math.min(...chunk.map(c => c.low)),
+      volume: chunk.reduce((s, c) => s + c.volume, 0)
+    });
   }
+  return result;
 }
 
-function updateOrderbook(stock) {
-  stock.orderbook.forEach(row => {
-    const oldQty = row.qty;
-    const qtyMove = randInt(-100, 140);
-    row.qty = clamp(oldQty + qtyMove, 20, 2000);
-    row.flash = row.qty > oldQty ? 1 : row.qty < oldQty ? -1 : 0;
-  });
-
-  const base = stock.currentPrice;
-  const asks = stock.orderbook.filter(r => r.side === "ask");
-  const bids = stock.orderbook.filter(r => r.side === "bid");
-
-  asks.forEach((row, idx) => {
-    row.price = Math.max(100, Math.round(base * (1 + (asks.length - idx) * 0.002)));
-  });
-
-  bids.forEach((row, idx) => {
-    row.price = Math.max(100, Math.round(base * (1 - (idx + 1) * 0.002)));
-  });
+function getDisplayCandles(stock) {
+  const all = stock.candles;
+  if (state.chartRange === "1m") return all.slice(-80);
+  if (state.chartRange === "5m") return compressCandles(all, 5).slice(-80);
+  if (state.chartRange === "1d") return compressCandles(all, 10).slice(-80);
+  if (state.chartRange === "1w") return compressCandles(all, 20).slice(-80);
+  return all.slice(-80);
 }
 
 function calcMA(candles, period) {
@@ -488,30 +553,25 @@ function calcMA(candles, period) {
   return result;
 }
 
-function getDisplayCandles(stock) {
-  const all = stock.candles;
-  if (state.chartRange === "1m") return all.slice(-80);
-  if (state.chartRange === "5m") return compressCandles(all, 5).slice(-80);
-  if (state.chartRange === "1d") return compressCandles(all, 10).slice(-80);
-  if (state.chartRange === "1w") return compressCandles(all, 20).slice(-80);
-  return all.slice(-80);
-}
+function drawMALine(ctx, lineData, candles, pad, chartWidth, priceToY, color) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  let started = false;
 
-function compressCandles(candles, step) {
-  const result = [];
-  for (let i = 0; i < candles.length; i += step) {
-    const chunk = candles.slice(i, i + step);
-    if (!chunk.length) continue;
-    result.push({
-      time: chunk[chunk.length - 1].time,
-      open: chunk[0].open,
-      close: chunk[chunk.length - 1].close,
-      high: Math.max(...chunk.map(c => c.high)),
-      low: Math.min(...chunk.map(c => c.low)),
-      volume: chunk.reduce((s, c) => s + c.volume, 0)
-    });
-  }
-  return result;
+  lineData.forEach((value, i) => {
+    if (value == null) return;
+    const x = pad.left + (i + 0.5) * (chartWidth / candles.length);
+    const y = priceToY(value);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+
+  ctx.stroke();
 }
 
 function drawChart() {
@@ -519,17 +579,18 @@ function drawChart() {
   const ctx = canvas.getContext("2d");
   const stock = getSelectedStock();
   const candles = getDisplayCandles(stock);
-  const ma5 = calcMA(candles, 5);
-  const ma20 = calcMA(candles, 20);
-  const ma60 = calcMA(candles, 60);
 
   canvas.width = CANVAS_W;
   canvas.height = CANVAS_H;
   ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
+  const ma5 = calcMA(candles, 5);
+  const ma20 = calcMA(candles, 20);
+  const ma60 = calcMA(candles, 60);
+
   const pad = { left: 70, right: 76, top: 26, bottom: 74 };
-  const volumeH = 150;
-  const chartBottom = CANVAS_H - pad.bottom - volumeH - 12;
+  const volumeH = 160;
+  const chartBottom = CANVAS_H - pad.bottom - volumeH - 14;
   const chartTop = pad.top;
   const chartHeight = chartBottom - chartTop;
   const chartWidth = CANVAS_W - pad.left - pad.right;
@@ -540,7 +601,7 @@ function drawChart() {
   const minPrice = Math.min(...candles.map(c => c.low)) * 0.98;
   const maxVolume = Math.max(...candles.map(c => c.volume), 1);
 
-  ctx.fillStyle = "#0c1220";
+  ctx.fillStyle = "#0b1120";
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
   ctx.strokeStyle = "rgba(255,255,255,0.06)";
@@ -562,23 +623,23 @@ function drawChart() {
     ctx.stroke();
   }
 
-  const candleW = chartWidth / candles.length * 0.64;
+  const candleW = (chartWidth / candles.length) * 0.64;
 
   function priceToY(price) {
     return chartTop + ((maxPrice - price) / (maxPrice - minPrice)) * chartHeight;
   }
 
-  function volToY(vol) {
-    return volTop + volHeight - (vol / maxVolume) * volHeight;
+  function volToY(volume) {
+    return volTop + volHeight - (volume / maxVolume) * volHeight;
   }
 
-  candles.forEach((c, i) => {
+  candles.forEach((candle, i) => {
     const x = pad.left + (i + 0.5) * (chartWidth / candles.length);
-    const openY = priceToY(c.open);
-    const closeY = priceToY(c.close);
-    const highY = priceToY(c.high);
-    const lowY = priceToY(c.low);
-    const up = c.close >= c.open;
+    const openY = priceToY(candle.open);
+    const closeY = priceToY(candle.close);
+    const highY = priceToY(candle.high);
+    const lowY = priceToY(candle.low);
+    const up = candle.close >= candle.open;
 
     ctx.strokeStyle = up ? "#ff6482" : "#5daeff";
     ctx.beginPath();
@@ -586,23 +647,24 @@ function drawChart() {
     ctx.lineTo(x, lowY);
     ctx.stroke();
 
-    ctx.fillStyle = up ? "#ff5c7c" : "#4ea1ff";
+    ctx.fillStyle = up ? "#ff5f82" : "#4f95ff";
     const bodyY = Math.min(openY, closeY);
     const bodyH = Math.max(2, Math.abs(closeY - openY));
     ctx.fillRect(x - candleW / 2, bodyY, candleW, bodyH);
 
-    const vy = volToY(c.volume);
-    ctx.fillStyle = up ? "rgba(255,92,124,.9)" : "rgba(78,161,255,.9)";
-    ctx.fillRect(x - candleW / 2, vy, candleW, volTop + volHeight - vy);
+    const volumeY = volToY(candle.volume);
+    ctx.fillStyle = up ? "rgba(255,95,130,.92)" : "rgba(79,149,255,.92)";
+    ctx.fillRect(x - candleW / 2, volumeY, candleW, volTop + volHeight - volumeY);
   });
 
-  drawMALine(ctx, ma5, candles, pad, chartWidth, priceToY, "#ff7f97");
-  drawMALine(ctx, ma20, candles, pad, chartWidth, priceToY, "#ff9d4d");
-  drawMALine(ctx, ma60, candles, pad, chartWidth, priceToY, "#b976ff");
+  drawMALine(ctx, ma5, candles, pad, chartWidth, priceToY, "#ff8da3");
+  drawMALine(ctx, ma20, candles, pad, chartWidth, priceToY, "#ff9a4d");
+  drawMALine(ctx, ma60, candles, pad, chartWidth, priceToY, "#b97cff");
 
-  ctx.fillStyle = "#9db0d8";
+  ctx.fillStyle = "#9fb3db";
   ctx.font = "12px Pretendard, sans-serif";
   ctx.textAlign = "right";
+
   for (let i = 0; i <= 5; i++) {
     const y = chartTop + (chartHeight / 5) * i;
     const price = maxPrice - ((maxPrice - minPrice) / 5) * i;
@@ -611,12 +673,11 @@ function drawChart() {
 
   for (let i = 0; i <= 2; i++) {
     const y = volTop + (volHeight / 2) * i;
-    const vol = maxVolume - (maxVolume / 2) * i;
-    ctx.fillText(formatVolume(vol), CANVAS_W - 12, y + 4);
+    const volume = maxVolume - (maxVolume / 2) * i;
+    ctx.fillText(formatVolume(volume), CANVAS_W - 12, y + 4);
   }
 
-  ctx.fillStyle = "rgba(255,255,255,.9)";
-  ctx.font = "13px Pretendard, sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,.92)";
   ctx.textAlign = "left";
   ctx.fillText("가격", 18, 28);
   ctx.fillStyle = "rgba(255,255,255,.7)";
@@ -634,46 +695,28 @@ function drawChart() {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    const c = candles[i];
+    const candle = candles[i];
     const tooltip = els.chartTooltip;
     tooltip.classList.remove("hidden");
     tooltip.innerHTML = `
       <div><b>${stock.name}</b></div>
-      <div>시가: ${formatKRW(c.open)}</div>
-      <div>고가: ${formatKRW(c.high)}</div>
-      <div>저가: ${formatKRW(c.low)}</div>
-      <div>종가: ${formatKRW(c.close)}</div>
-      <div>거래량: ${formatVolume(c.volume)}</div>
+      <div>시가: ${formatKRW(candle.open)}</div>
+      <div>고가: ${formatKRW(candle.high)}</div>
+      <div>저가: ${formatKRW(candle.low)}</div>
+      <div>종가: ${formatKRW(candle.close)}</div>
+      <div>거래량: ${formatVolume(candle.volume)}</div>
     `;
+
     const rect = canvas.getBoundingClientRect();
     const ratioX = rect.width / CANVAS_W;
     const ratioY = rect.height / CANVAS_H;
     const left = (x * ratioX) + 18;
-    const top = (priceToY(c.high) * ratioY) + 12;
+    const top = (priceToY(candle.high) * ratioY) + 12;
     tooltip.style.left = `${Math.min(left, rect.width - 220)}px`;
     tooltip.style.top = `${Math.min(top, rect.height - 150)}px`;
   } else {
     els.chartTooltip.classList.add("hidden");
   }
-}
-
-function drawMALine(ctx, lineData, candles, pad, chartWidth, priceToY, color) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  let started = false;
-  lineData.forEach((v, i) => {
-    if (v == null) return;
-    const x = pad.left + (i + 0.5) * (chartWidth / candles.length);
-    const y = priceToY(v);
-    if (!started) {
-      ctx.moveTo(x, y);
-      started = true;
-    } else {
-      ctx.lineTo(x, y);
-    }
-  });
-  ctx.stroke();
 }
 
 function renderSelectedHeader() {
@@ -686,15 +729,17 @@ function renderSelectedHeader() {
   els.symbolLogo.textContent = stock.logo;
   els.selectedPrice.textContent = formatKRW(stock.currentPrice);
   els.selectedChange.textContent = `${formatSignedKRW(diff)} (${formatSignedPct(rate)})`;
-  els.selectedChange.className = `price-change ${rate >= 0 ? "positive" : "negative"}`;
+  els.selectedChange.className = `main-change ${rate >= 0 ? "positive" : "negative"}`;
+
   els.dayHigh.textContent = formatKRW(stock.dayHigh);
   els.dayLow.textContent = formatKRW(stock.dayLow);
   els.dayOpen.textContent = formatKRW(stock.candles[0].open);
-  els.dayVolume.textContent = formatVolume(stock.candles.reduce((s, c) => s + c.volume, 0));
+  els.dayVolume.textContent = formatVolume(stock.candles.reduce((sum, c) => sum + c.volume, 0));
 
   const holding = getHolding(stock.code);
   els.holdingQtyInline.textContent = `${holding.qty.toLocaleString("ko-KR")}주`;
   els.avgPriceInline.textContent = holding.qty > 0 ? formatKRW(holding.avgPrice) : "0원";
+
   els.availableCash.textContent = formatKRW(state.portfolio.cash);
   els.maxBuyQty.textContent = `${Math.floor(state.portfolio.cash / Math.max(1, stock.currentPrice)).toLocaleString("ko-KR")}주`;
   els.currentHoldingQty.textContent = `${holding.qty.toLocaleString("ko-KR")}주`;
@@ -702,11 +747,13 @@ function renderSelectedHeader() {
 
   els.favoriteToggleBtn.textContent = state.favorites.includes(stock.code) ? "★" : "☆";
 
-  const mood = stock.mood;
-  els.moodFill.style.width = `${mood}%`;
-  els.moodText.textContent = mood >= 68 ? "매수 우위" : mood <= 34 ? "매도 우위" : "중립";
+  els.moodFill.style.width = `${stock.mood}%`;
+  els.moodText.textContent = stock.mood >= 68 ? "매수 우위" : stock.mood <= 34 ? "매도 우위" : "중립";
 
-  els.orderPrice.value = Math.round(stock.currentPrice);
+  if (document.activeElement !== els.orderPrice) {
+    els.orderPrice.value = Math.round(stock.currentPrice);
+  }
+
   updateEstimate();
 }
 
@@ -730,56 +777,6 @@ function renderPortfolio() {
   els.portfolioInvested.textContent = formatKRW(invested);
   els.portfolioRate.textContent = formatSignedPct(rate);
   els.portfolioRate.className = rate >= 0 ? "positive" : "negative";
-}
-
-function renderWatchlist() {
-  const watchlist = [...state.stocks];
-  const q = state.searchTerm.trim().toLowerCase();
-
-  let filtered = watchlist.filter(s =>
-    s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q) || s.theme.toLowerCase().includes(q)
-  );
-
-  if (state.sortBy === "change") {
-    filtered.sort((a, b) => getStockRate(b) - getStockRate(a));
-  } else if (state.sortBy === "volume") {
-    filtered.sort((a, b) => b.currentVolume - a.currentVolume);
-  }
-
-  const maxVolume = Math.max(...filtered.map(s => s.currentVolume), 1);
-
-  els.watchlist.innerHTML = filtered.map(stock => {
-    const rate = getStockRate(stock);
-    const diff = stock.currentPrice - stock.prevClose;
-    const isActive = stock.code === state.selectedCode;
-    const volumePct = (stock.currentVolume / maxVolume) * 100;
-    return `
-      <div class="watch-item ${isActive ? "active" : ""}" data-code="${stock.code}">
-        <div class="watch-top">
-          <div class="watch-left">
-            <div class="watch-logo">${stock.logo}</div>
-            <div class="watch-name-wrap">
-              <div class="watch-name">${stock.name}</div>
-              <div class="watch-code">${stock.code} · ${stock.theme}</div>
-            </div>
-          </div>
-          <div class="watch-right">
-            <div class="watch-price">${formatKRW(stock.currentPrice)}</div>
-            <div class="watch-change ${rate >= 0 ? "positive" : "negative"}">
-              ${formatSignedKRW(diff)} (${formatSignedPct(rate)})
-            </div>
-          </div>
-        </div>
-        <div class="watch-bottom">
-          <div class="volume-bar"><div class="volume-fill" style="width:${volumePct}%"></div></div>
-          <div class="watch-mini">거래량 ${formatVolume(stock.currentVolume)}</div>
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  renderFavorites();
-  els.marketAlertBadge.textContent = String(state.marketAlertCount);
 }
 
 function renderFavorites() {
@@ -816,6 +813,59 @@ function renderFavorites() {
   }).join("");
 }
 
+function renderWatchlist() {
+  let list = [...state.stocks];
+  const q = state.searchTerm.trim().toLowerCase();
+
+  list = list.filter(stock =>
+    stock.name.toLowerCase().includes(q) ||
+    stock.code.toLowerCase().includes(q) ||
+    stock.theme.toLowerCase().includes(q)
+  );
+
+  if (state.sortBy === "change") {
+    list.sort((a, b) => getStockRate(b) - getStockRate(a));
+  } else {
+    list.sort((a, b) => b.currentVolume - a.currentVolume);
+  }
+
+  const maxVolume = Math.max(...list.map(s => s.currentVolume), 1);
+
+  els.watchlist.innerHTML = list.map(stock => {
+    const rate = getStockRate(stock);
+    const diff = stock.currentPrice - stock.prevClose;
+    const isActive = stock.code === state.selectedCode;
+    const volumePct = (stock.currentVolume / maxVolume) * 100;
+
+    return `
+      <div class="watch-item ${isActive ? "active" : ""}" data-code="${stock.code}">
+        <div class="watch-top">
+          <div class="watch-left">
+            <div class="watch-logo">${stock.logo}</div>
+            <div class="watch-name-wrap">
+              <div class="watch-name">${stock.name}</div>
+              <div class="watch-code">${stock.code} · ${stock.theme}</div>
+            </div>
+          </div>
+          <div class="watch-right">
+            <div class="watch-price">${formatKRW(stock.currentPrice)}</div>
+            <div class="watch-change ${rate >= 0 ? "positive" : "negative"}">
+              ${formatSignedKRW(diff)} (${formatSignedPct(rate)})
+            </div>
+          </div>
+        </div>
+        <div class="watch-bottom">
+          <div class="volume-bar"><div class="volume-fill" style="width:${volumePct}%"></div></div>
+          <div class="watch-mini">거래량 ${formatVolume(stock.currentVolume)}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  renderFavorites();
+  els.marketAlertBadge.textContent = String(state.marketAlertCount);
+}
+
 function renderOrderbook() {
   const stock = getSelectedStock();
   els.orderbookRows.innerHTML = stock.orderbook.map(row => `
@@ -838,6 +888,7 @@ function renderNews() {
       <div class="news-desc">${item.desc}</div>
     </div>
   `).join("");
+
   els.newsCountChip.textContent = `${state.news.length}건`;
 }
 
@@ -872,20 +923,9 @@ function updateEstimate() {
   const qty = Math.max(0, parseInt(els.orderQty.value || "0", 10));
   const amount = price * qty;
   const fee = amount * 0.0015;
+
   els.estimatedCost.textContent = formatKRW(amount);
   els.estimatedFee.textContent = formatKRW(fee);
-}
-
-function renderAll() {
-  renderSelectedHeader();
-  renderPortfolio();
-  renderWatchlist();
-  renderOrderbook();
-  renderNews();
-  renderHistory();
-  drawChart();
-  updateSpeedButtons();
-  updateOrderModeButtons();
 }
 
 function updateSpeedButtons() {
@@ -901,6 +941,24 @@ function updateOrderModeButtons() {
   els.submitOrderBtn.className = `primary-order-btn ${state.orderMode}`;
 }
 
+function renderControlButtons() {
+  els.pauseBtn.textContent = state.isPaused ? "일시정지됨" : "일시정지";
+  els.resumeBtn.textContent = state.isStopped ? "재개(정지 해제)" : "재개";
+}
+
+function renderAll() {
+  renderSelectedHeader();
+  renderPortfolio();
+  renderWatchlist();
+  renderOrderbook();
+  renderNews();
+  renderHistory();
+  drawChart();
+  updateSpeedButtons();
+  updateOrderModeButtons();
+  renderControlButtons();
+}
+
 function setSelectedStock(code) {
   if (!state.stocks.some(s => s.code === code)) return;
   state.selectedCode = code;
@@ -909,18 +967,18 @@ function setSelectedStock(code) {
 }
 
 function toggleFavorite() {
-  const code = state.selectedCode;
-  const idx = state.favorites.indexOf(code);
   const stock = getSelectedStock();
+  const idx = state.favorites.indexOf(stock.code);
 
   if (idx >= 0) {
     state.favorites.splice(idx, 1);
-    addAlert(`${stock.name} 즐겨찾기 해제`, stock, "alert");
+    addAlert(`${stock.name} 즐겨찾기 해제`, stock);
   } else {
-    state.favorites.unshift(code);
+    state.favorites.unshift(stock.code);
     state.favorites = [...new Set(state.favorites)].slice(0, 10);
-    addAlert(`${stock.name} 즐겨찾기 추가`, stock, "alert");
+    addAlert(`${stock.name} 즐겨찾기 추가`, stock);
   }
+
   renderAll();
   saveState();
 }
@@ -947,9 +1005,7 @@ function executeOrder() {
     }
 
     const newQty = holding.qty + qty;
-    const newAvg = newQty > 0
-      ? ((holding.avgPrice * holding.qty) + amount) / newQty
-      : 0;
+    const newAvg = newQty > 0 ? ((holding.avgPrice * holding.qty) + amount) / newQty : 0;
 
     state.portfolio.cash -= totalCost;
     state.portfolio.holdings[stock.code] = {
@@ -958,7 +1014,7 @@ function executeOrder() {
     };
 
     addOrderHistory("buy", stock, qty, price, totalCost, `수수료 ${formatKRW(fee)} 포함`);
-    addAlert(`${stock.name} ${qty.toLocaleString("ko-KR")}주 매수 체결`, stock, "alert");
+    addAlert(`${stock.name} ${qty.toLocaleString("ko-KR")}주 매수 체결`, stock);
   } else {
     if (holding.qty < qty) {
       alert("보유 수량이 부족하다.");
@@ -979,7 +1035,7 @@ function executeOrder() {
     }
 
     addOrderHistory("sell", stock, qty, price, proceeds, `수수료 ${formatKRW(fee)} 차감`);
-    addAlert(`${stock.name} ${qty.toLocaleString("ko-KR")}주 매도 체결`, stock, "alert");
+    addAlert(`${stock.name} ${qty.toLocaleString("ko-KR")}주 매도 체결`, stock);
   }
 
   renderAll();
@@ -997,20 +1053,83 @@ function setOrderRatio(ratio) {
   } else {
     els.orderQty.value = Math.max(1, Math.floor(holding.qty * ratio));
   }
+
   updateEstimate();
 }
 
 function sellAll() {
   state.orderMode = "sell";
   updateOrderModeButtons();
+
   const holding = getHolding(state.selectedCode);
   if (holding.qty <= 0) {
     alert("전량 매도할 보유 수량이 없다.");
     return;
   }
+
   els.orderQty.value = holding.qty;
   els.orderPrice.value = Math.round(getSelectedStock().currentPrice);
   updateEstimate();
+}
+
+function supportFund() {
+  state.portfolio.cash += SUPPORT_FUND;
+  addAlert(`긴급지원금 ${formatKRW(SUPPORT_FUND)} 지급 완료`, null);
+  state.orderHistory.unshift({
+    id: `${Date.now()}_${Math.random()}`,
+    type: "buy",
+    code: "SYSTEM",
+    name: "긴급지원금",
+    qty: 1,
+    price: SUPPORT_FUND,
+    amount: SUPPORT_FUND,
+    note: "운영 지원금 지급",
+    time: nowTime()
+  });
+  state.orderHistory = state.orderHistory.slice(0, ORDER_LIMIT);
+  renderAll();
+  saveState();
+}
+
+function pauseSimulation() {
+  state.isPaused = true;
+  state.isStopped = false;
+  addAlert("시장 시뮬레이션 일시정지", null);
+  renderControlButtons();
+  saveState();
+}
+
+function resumeSimulation() {
+  state.isPaused = false;
+  state.isStopped = false;
+  addAlert("시장 시뮬레이션 재개", null);
+  renderControlButtons();
+  saveState();
+}
+
+function stopSimulation() {
+  state.isStopped = true;
+  state.isPaused = false;
+  addAlert("시장 시뮬레이션 정지", null);
+  renderControlButtons();
+  saveState();
+}
+
+function handleChartHover(e) {
+  const canvas = els.priceChart;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const stock = getSelectedStock();
+  const candles = getDisplayCandles(stock);
+
+  const padLeft = 70;
+  const padRight = 76;
+  const chartWidth = CANVAS_W - padLeft - padRight;
+  const innerX = (x / rect.width) * CANVAS_W - padLeft;
+  const idx = Math.floor((innerX / chartWidth) * candles.length);
+
+  state.hoverIndex = clamp(idx, 0, candles.length - 1);
+  drawChart();
 }
 
 function bindEvents() {
@@ -1067,7 +1186,7 @@ function bindEvents() {
 
   els.submitOrderBtn.addEventListener("click", executeOrder);
 
-  document.querySelector(".quick-buttons").addEventListener("click", e => {
+  document.querySelector(".quick-row").addEventListener("click", e => {
     const btn = e.target.closest("button[data-ratio]");
     if (btn) {
       setOrderRatio(Number(btn.dataset.ratio));
@@ -1109,6 +1228,11 @@ function bindEvents() {
     saveState();
   });
 
+  els.supportFundBtn.addEventListener("click", supportFund);
+  els.pauseBtn.addEventListener("click", pauseSimulation);
+  els.resumeBtn.addEventListener("click", resumeSimulation);
+  els.stopBtn.addEventListener("click", stopSimulation);
+
   els.priceChart.addEventListener("mousemove", handleChartHover);
   els.priceChart.addEventListener("mouseleave", () => {
     state.hoverIndex = -1;
@@ -1116,31 +1240,19 @@ function bindEvents() {
   });
 }
 
-function handleChartHover(e) {
-  const canvas = els.priceChart;
-  const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const stock = getSelectedStock();
-  const candles = getDisplayCandles(stock);
-  const padLeft = 70;
-  const padRight = 76;
-  const chartWidth = CANVAS_W - padLeft - padRight;
-  const innerX = (x / rect.width) * CANVAS_W - padLeft;
-  const idx = Math.floor((innerX / chartWidth) * candles.length);
-  state.hoverIndex = clamp(idx, 0, candles.length - 1);
-  drawChart();
-}
-
 function cacheElements() {
   [
     "selectedName","selectedCode","selectedPrice","selectedChange","dayHigh","dayLow","dayOpen","dayVolume",
-    "favoriteToggleBtn","symbolLogo","moodFill","moodText","watchlist","favoritesList","orderbookRows","newsFeed",
-    "orderHistoryList","alertHistoryList","newsCountChip","orderPrice","orderQty","estimatedCost","estimatedFee",
-    "buyModeBtn","sellModeBtn","submitOrderBtn","searchInput","priceChart","chartTooltip","clearHistoryBtn",
-    "alertBadge","alertBellBtn","marketAlertBadge","holdingQtyInline","avgPriceInline","availableCash","maxBuyQty",
-    "currentHoldingQty","currentAvgPrice","portfolioTotal","portfolioPL","portfolioCash","portfolioStockValue",
-    "portfolioInvested","portfolioRate","totalAssetTop","profitLossTop","cashTop"
-  ].forEach(id => els[id] = document.getElementById(id));
+    "favoriteToggleBtn","symbolLogo","moodFill","moodText","watchlist","favoritesList","orderbookRows",
+    "newsFeed","orderHistoryList","alertHistoryList","newsCountChip","orderPrice","orderQty","estimatedCost",
+    "estimatedFee","buyModeBtn","sellModeBtn","submitOrderBtn","searchInput","priceChart","chartTooltip",
+    "clearHistoryBtn","alertBadge","alertBellBtn","marketAlertBadge","holdingQtyInline","avgPriceInline",
+    "availableCash","maxBuyQty","currentHoldingQty","currentAvgPrice","portfolioTotal","portfolioPL",
+    "portfolioCash","portfolioStockValue","portfolioInvested","portfolioRate","totalAssetTop","profitLossTop",
+    "cashTop","supportFundBtn","pauseBtn","resumeBtn","stopBtn"
+  ].forEach(id => {
+    els[id] = document.getElementById(id);
+  });
 }
 
 function seedInitialNews() {
@@ -1154,11 +1266,26 @@ function init() {
   const loaded = loadState();
   if (!loaded) {
     buildInitialStocks();
+    state.portfolio = { cash: INITIAL_CASH, holdings: {} };
     seedInitialNews();
   }
 
-  document.querySelectorAll(".sort-btn").forEach(b => b.classList.toggle("active", b.dataset.sort === state.sortBy));
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.chartRange === state.chartRange));
+  if (!state.stocks.length) {
+    buildInitialStocks();
+  }
+
+  if (!Number.isFinite(state.portfolio.cash) || state.portfolio.cash <= 0) {
+    state.portfolio.cash = INITIAL_CASH;
+  }
+
+  document.querySelectorAll(".sort-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.sort === state.sortBy);
+  });
+
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.chartRange === state.chartRange);
+  });
+
   bindEvents();
   renderAll();
   saveState();
