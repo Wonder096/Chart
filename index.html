@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>K-모의증권</title>
+  <title>K-모의증권 Pro</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet" />
@@ -19,13 +19,14 @@
       <div class="brand">
         <div class="brand-mark">₩</div>
         <div>
-          <p class="brand-label">KOREA MOCK EXCHANGE</p>
-          <h1>K-모의증권</h1>
+          <p class="brand-label">KOREA MOCK EXCHANGE PRO</p>
+          <h1>K-모의증권 Pro</h1>
         </div>
       </div>
 
       <div class="top-actions">
         <button id="pauseBtn" class="ghost-btn">일시정지</button>
+        <button id="speedBtn" class="ghost-btn">속도 x1</button>
         <button id="resetBtn" class="danger-btn">초기화</button>
       </div>
     </header>
@@ -54,8 +55,8 @@
             <strong id="slippageValue">0.06%</strong>
           </div>
           <div class="stat-chip">
-            <span>실행 속도</span>
-            <strong>1초</strong>
+            <span>상태</span>
+            <strong id="marketStatusText">실행 중</strong>
           </div>
         </div>
 
@@ -109,7 +110,7 @@
           <div class="panel-head">
             <div>
               <p class="mini-label">LEADERBOARD</p>
-              <h3>개인 자산 랭킹</h3>
+              <h3>총자산 랭킹</h3>
             </div>
           </div>
           <div id="rankingList" class="ranking-list"></div>
@@ -130,8 +131,8 @@
         <div class="panel glass sticky-panel">
           <div class="panel-head">
             <div>
-              <p class="mini-label">MY TRADING PANEL</p>
-              <h3>내 주식 패널</h3>
+              <p class="mini-label">TRADING PANEL</p>
+              <h3>내 트레이딩 패널</h3>
             </div>
           </div>
 
@@ -191,6 +192,11 @@
           <div class="info-section">
             <h4>기준 가격</h4>
             <div id="priceInfoBox" class="desc-box mono-box"></div>
+          </div>
+
+          <div class="info-section">
+            <h4>정식 캔들차트</h4>
+            <canvas id="candleCanvas" class="candle-canvas" width="900" height="320"></canvas>
           </div>
 
           <div class="info-section">
