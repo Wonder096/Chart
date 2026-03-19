@@ -48,11 +48,11 @@
           </div>
           <div class="stat-chip">
             <span>수수료</span>
-            <strong id="feeValue">0.10%</strong>
+            <strong>0.10%</strong>
           </div>
           <div class="stat-chip">
             <span>슬리피지</span>
-            <strong id="slippageValue">0.06%</strong>
+            <strong>0.06%</strong>
           </div>
           <div class="stat-chip">
             <span>상태</span>
@@ -60,12 +60,16 @@
           </div>
         </div>
 
-        <div class="ticker-panel">
-          <div class="ticker-head">
-            <span>실시간 속보</span>
-            <span class="dot-pulse"></span>
+        <div class="market-news-wrap">
+          <div class="news-ticker-box">
+            <div class="news-ticker-head">
+              <span>실시간 속보</span>
+              <span class="dot-pulse"></span>
+            </div>
+            <div id="headlineTicker" class="headline-ticker">📰 현재 표시할 속보가 없음</div>
           </div>
-          <div id="headlineList" class="headline-list"></div>
+
+          <div id="headlineCards" class="headline-cards"></div>
         </div>
       </div>
 
@@ -195,8 +199,16 @@
           </div>
 
           <div class="info-section">
-            <h4>정식 캔들차트</h4>
-            <canvas id="candleCanvas" class="candle-canvas" width="900" height="320"></canvas>
+            <div class="chart-title-row">
+              <h4>캔들차트</h4>
+              <div class="ma-legend">
+                <span class="ma ma5">MA5</span>
+                <span class="ma ma20">MA20</span>
+                <span class="ma ma60">MA60</span>
+              </div>
+            </div>
+            <canvas id="candleCanvas" class="candle-canvas" width="900" height="360"></canvas>
+            <div id="chartTooltip" class="chart-tooltip hidden"></div>
           </div>
 
           <div class="info-section">
@@ -237,6 +249,48 @@
       </div>
       <div class="modal-actions">
         <button id="modalSubmitBtn" class="primary-btn">확인</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="detailModal" class="modal hidden">
+    <div class="modal-backdrop" data-close-detail="true"></div>
+    <div class="detail-modal-content glass">
+      <div class="modal-head">
+        <h3 id="detailTitle">종목 상세</h3>
+        <button id="detailCloseBtn" class="modal-close">×</button>
+      </div>
+
+      <div class="detail-top">
+        <div>
+          <div id="detailPrice" class="detail-price">0원</div>
+          <div id="detailChange" class="detail-change">+0.00%</div>
+        </div>
+        <div id="detailState" class="selected-state neutral">보합</div>
+      </div>
+
+      <div class="detail-grid">
+        <div class="detail-box">
+          <h5>종목 개요</h5>
+          <div id="detailInfo"></div>
+        </div>
+        <div class="detail-box">
+          <h5>시세 정보</h5>
+          <div id="detailPriceInfo"></div>
+        </div>
+        <div class="detail-box">
+          <h5>실시간 뉴스</h5>
+          <div id="detailNews"></div>
+        </div>
+        <div class="detail-box">
+          <h5>기술 지표</h5>
+          <div id="detailTech"></div>
+        </div>
+      </div>
+
+      <div class="detail-box">
+        <h5>최근 캔들</h5>
+        <div id="detailCandles" class="detail-candles"></div>
       </div>
     </div>
   </div>
