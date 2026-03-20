@@ -1,9 +1,9 @@
-const STORAGE_KEY = "k_mock_trading_pro_v6_ui_news";
+const STORAGE_KEY = "k_mock_trading_pro_v7_autosell_fixedsort";
 const INITIAL_CASH = 10000000;
 const SUPPORT_FUND = 1000000;
 const NEWS_LIMIT = 100;
-const ORDER_LIMIT = 160;
-const ALERT_LIMIT = 160;
+const ORDER_LIMIT = 200;
+const ALERT_LIMIT = 200;
 const CANVAS_W = 1280;
 const CANVAS_H = 700;
 
@@ -68,6 +68,8 @@ const state = {
   news: [],
   alerts: [],
   orderHistory: [],
+  autoSellOrders: [],
+  watchlistOrder: [],
   portfolio: {
     cash: INITIAL_CASH,
     holdings: {}
@@ -163,12 +165,43 @@ function generateOrderbook(stock) {
   return rows;
 }
 
+function getSelectedStock() {
+  return state.stocks.find(s => s.code === state.selectedCode) || state.stocks[0];
+}
+function getHolding(code) {
+  return state.portfolio.holdings[code] || { qty: 0, avgPrice: 0 };
+}
+function getStockRate(stock) {
+  return ((stock.currentPrice - stock.prevClose) / stock.prevClose) * 100;
+}
+function getStockValueOfHolding(code) {
+  const stock = state.stocks.find(s => s.code === code);
+  const holding = getHolding(code);
+  return stock ? stock.currentPrice * holding.qty : 0;
+}
+function getInvestedAmount() {
+  return Object.values(state.portfolio.holdings).reduce((sum, h) => sum + (h.avgPrice * h.qty), 0);
+}
+function getStockEvaluation() {
+  return Object.keys(state.portfolio.holdings).reduce((sum, code) => sum + getStockValueOfHolding(code), 0);
+}
+function getTotalAsset() {
+  return state.portfolio.cash + getStockEvaluation();
+}
+function getProfitLoss() {
+  return getTotalAsset() - INITIAL_CASH;
+}
+function getProfitRate() {
+  return ((getTotalAsset() - INITIAL_CASH) / INITIAL_CASH) * 100;
+}
+
 function buildInitialState() {
   state.portfolio = { cash: INITIAL_CASH, holdings: {} };
   state.favorites = [];
   state.news = [];
   state.alerts = [];
   state.orderHistory = [];
+  state.autoSellOrders = [];
   state.alertCount = 0;
   state.marketAlertCount = 0;
   state.isPaused = false;
@@ -178,6 +211,7 @@ function buildInitialState() {
   state.sortBy = "change";
   state.chartRange = "1m";
   state.selectedCode = "KQ001";
+  state.searchTerm = "";
 
   state.stocks = STOCK_SEED.map(seed => {
     const generated = generateCandles(seed.base);
@@ -202,6 +236,7 @@ function buildInitialState() {
   });
 
   seedInitialNews();
+  rebuildWatchlistOrder();
   saveState();
 }
 
@@ -218,6 +253,8 @@ function sanitizeLoadedState(raw) {
   state.news = Array.isArray(raw.news) ? raw.news : [];
   state.alerts = Array.isArray(raw.alerts) ? raw.alerts : [];
   state.orderHistory = Array.isArray(raw.orderHistory) ? raw.orderHistory : [];
+  state.autoSellOrders = Array.isArray(raw.autoSellOrders) ? raw.autoSellOrders : [];
+  state.watchlistOrder = Array.isArray(raw.watchlistOrder) ? raw.watchlistOrder : [];
   state.isPaused = !!raw.isPaused;
   state.isStopped = !!raw.isStopped;
   state.portfolio = raw.portfolio && typeof raw.portfolio === "object" ? raw.portfolio : { cash: INITIAL_CASH, holdings: {} };
@@ -252,6 +289,7 @@ function sanitizeLoadedState(raw) {
     state.selectedCode = state.stocks[0].code;
   }
 
+  if (!state.watchlistOrder.length) rebuildWatchlistOrder();
   return true;
 }
 
@@ -277,6 +315,8 @@ function saveState() {
     news: state.news.slice(0, NEWS_LIMIT),
     alerts: state.alerts.slice(0, ALERT_LIMIT),
     orderHistory: state.orderHistory.slice(0, ORDER_LIMIT),
+    autoSellOrders: state.autoSellOrders,
+    watchlistOrder: state.watchlistOrder,
     isPaused: state.isPaused,
     isStopped: state.isStopped,
     portfolio: state.portfolio,
@@ -285,34 +325,14 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
 }
 
-function getSelectedStock() {
-  return state.stocks.find(s => s.code === state.selectedCode) || state.stocks[0];
-}
-function getHolding(code) {
-  return state.portfolio.holdings[code] || { qty: 0, avgPrice: 0 };
-}
-function getStockRate(stock) {
-  return ((stock.currentPrice - stock.prevClose) / stock.prevClose) * 100;
-}
-function getStockValueOfHolding(code) {
-  const stock = state.stocks.find(s => s.code === code);
-  const holding = getHolding(code);
-  return stock ? stock.currentPrice * holding.qty : 0;
-}
-function getInvestedAmount() {
-  return Object.values(state.portfolio.holdings).reduce((sum, h) => sum + (h.avgPrice * h.qty), 0);
-}
-function getStockEvaluation() {
-  return Object.keys(state.portfolio.holdings).reduce((sum, code) => sum + getStockValueOfHolding(code), 0);
-}
-function getTotalAsset() {
-  return state.portfolio.cash + getStockEvaluation();
-}
-function getProfitLoss() {
-  return getTotalAsset() - INITIAL_CASH;
-}
-function getProfitRate() {
-  return ((getTotalAsset() - INITIAL_CASH) / INITIAL_CASH) * 100;
+function rebuildWatchlistOrder() {
+  const sorted = [...state.stocks];
+  if (state.sortBy === "change") {
+    sorted.sort((a, b) => getStockRate(b) - getStockRate(a));
+  } else {
+    sorted.sort((a, b) => b.currentVolume - a.currentVolume);
+  }
+  state.watchlistOrder = sorted.map(s => s.code);
 }
 
 function addNews(type, stock, title, desc) {
@@ -407,6 +427,73 @@ function maybeGenerateNews(stock) {
   }
 }
 
+function executeMarketSell(code, qty, reason) {
+  const stock = state.stocks.find(s => s.code === code);
+  if (!stock) return false;
+
+  const holding = getHolding(code);
+  if (holding.qty <= 0) return false;
+
+  const realQty = Math.min(qty, holding.qty);
+  if (realQty <= 0) return false;
+
+  const price = Math.round(stock.currentPrice);
+  const amount = price * realQty;
+  const fee = Math.round(amount * 0.0015);
+  const proceeds = amount - fee;
+  const remainQty = holding.qty - realQty;
+
+  state.portfolio.cash += proceeds;
+
+  if (remainQty <= 0) {
+    delete state.portfolio.holdings[code];
+  } else {
+    state.portfolio.holdings[code] = {
+      qty: remainQty,
+      avgPrice: holding.avgPrice
+    };
+  }
+
+  addOrderHistory("sell", stock, realQty, price, proceeds, reason);
+  addAlert(`${stock.name} 자동매도 실행 · ${realQty.toLocaleString("ko-KR")}주`, stock);
+  addNews("event", stock, `${stock.name} 자동매도 체결`, `${reason} 조건이 충족되어 ${realQty.toLocaleString("ko-KR")}주가 자동으로 매도되었다.`);
+  return true;
+}
+
+function checkAutoSellOrders() {
+  if (!state.autoSellOrders.length) return;
+
+  const remain = [];
+
+  state.autoSellOrders.forEach(order => {
+    const stock = state.stocks.find(s => s.code === order.code);
+    if (!stock) return;
+
+    const holding = getHolding(order.code);
+    if (holding.qty <= 0) return;
+
+    const current = stock.currentPrice;
+    const targetHit = order.targetPrice && current >= order.targetPrice;
+    const stopHit = order.stopPrice && current <= order.stopPrice;
+
+    if (!targetHit && !stopHit) {
+      remain.push(order);
+      return;
+    }
+
+    const qty = order.sellAll ? holding.qty : Math.min(order.qty, holding.qty);
+    if (qty <= 0) return;
+
+    const reason = targetHit
+      ? `목표가 ${formatKRW(order.targetPrice)} 도달`
+      : `손절가 ${formatKRW(order.stopPrice)} 도달`;
+
+    executeMarketSell(order.code, qty, reason);
+  });
+
+  state.autoSellOrders = remain;
+}
+
 function simulateTick() {
   if (state.isPaused || state.isStopped) return;
 
@@ -454,6 +541,7 @@ function simulateTick() {
     });
   }
 
+  checkAutoSellOrders();
   renderAll();
   saveState();
 }
@@ -792,20 +880,17 @@ function renderFavorites() {
 }
 
 function renderWatchlist() {
-  let list = [...state.stocks];
+  const order = state.watchlistOrder.length ? state.watchlistOrder : state.stocks.map(s => s.code);
   const q = state.searchTerm.trim().toLowerCase();
 
-  list = list.filter(stock =>
-    stock.name.toLowerCase().includes(q) ||
-    stock.code.toLowerCase().includes(q) ||
-    stock.theme.toLowerCase().includes(q)
-  );
-
-  if (state.sortBy === "change") {
-    list.sort((a, b) => getStockRate(b) - getStockRate(a));
-  } else {
-    list.sort((a, b) => b.currentVolume - a.currentVolume);
-  }
+  const list = order
+    .map(code => state.stocks.find(s => s.code === code))
+    .filter(Boolean)
+    .filter(stock =>
+      stock.name.toLowerCase().includes(q) ||
+      stock.code.toLowerCase().includes(q) ||
+      stock.theme.toLowerCase().includes(q)
+    );
 
   els.watchlist.innerHTML = list.map(stock => buildWatchItem(stock, false)).join("");
   renderFavorites();
@@ -887,6 +972,31 @@ function renderHistory() {
   els.alertBadge.textContent = String(state.alertCount);
 }
 
+function renderAutoSellList() {
+  const stock = getSelectedStock();
+  const list = state.autoSellOrders.filter(o => o.code === stock.code);
+
+  if (!list.length) {
+    els.autoSellList.innerHTML = `<div class="empty-state-box">등록된 자동매도가 없다</div>`;
+    return;
+  }
+
+  els.autoSellList.innerHTML = list.map(order => `
+    <div class="auto-sell-item">
+      <div class="auto-sell-item-top">
+        <span class="auto-sell-type ${order.targetPrice ? "target" : "stop"}">${order.targetPrice ? "목표가" : "손절가"}</span>
+        <button type="button" class="auto-sell-delete" data-id="${order.id}">삭제</button>
+      </div>
+      <div class="auto-sell-item-main">
+        ${order.targetPrice ? formatKRW(order.targetPrice) : formatKRW(order.stopPrice)}
+      </div>
+      <div class="auto-sell-item-sub">
+        ${order.sellAll ? "전량매도" : `${order.qty.toLocaleString("ko-KR")}주 매도`}
+      </div>
+    </div>
+  `).join("");
+}
+
 function updateEstimate() {
   const price = Math.max(1, parseInt(els.orderPrice.value || "0", 10));
   const qty = Math.max(0, parseInt(els.orderQty.value || "0", 10));
@@ -919,6 +1029,7 @@ function renderAll() {
   renderNews();
   renderSelectedStockNews();
   renderHistory();
+  renderAutoSellList();
   drawChart();
   updateSpeedButtons();
   updateOrderModeButtons();
@@ -1059,6 +1170,48 @@ function stopSimulation() {
   saveState();
 }
 
+function addAutoSellOrder() {
+  const stock = getSelectedStock();
+  const targetPrice = parseInt(els.autoSellTargetPrice.value || "0", 10);
+  const stopPrice = parseInt(els.autoSellStopPrice.value || "0", 10);
+  const qty = Math.max(1, parseInt(els.autoSellQty.value || "1", 10));
+  const sellAll = !!els.autoSellAll.checked;
+
+  if (!targetPrice && !stopPrice) {
+    alert("목표가 또는 손절가 중 하나는 입력해야 한다.");
+    return;
+  }
+
+  if (targetPrice && stopPrice) {
+    alert("한 번에 하나만 등록해줘. 목표가 또는 손절가 한 개씩 등록하는 방식이다.");
+    return;
+  }
+
+  state.autoSellOrders.push({
+    id: `${Date.now()}_${Math.random()}`,
+    code: stock.code,
+    targetPrice: targetPrice || 0,
+    stopPrice: stopPrice || 0,
+    qty,
+    sellAll
+  });
+
+  els.autoSellTargetPrice.value = "";
+  els.autoSellStopPrice.value = "";
+  els.autoSellQty.value = "1";
+  els.autoSellAll.checked = false;
+
+  addAlert(`${stock.name} 자동매도 등록`, stock);
+  renderAutoSellList();
+  saveState();
+}
+
+function deleteAutoSellOrder(id) {
+  state.autoSellOrders = state.autoSellOrders.filter(order => order.id !== id);
+  renderAutoSellList();
+  saveState();
+}
+
 function handleChartHover(e) {
   const canvas = els.priceChart;
   const rect = canvas.getBoundingClientRect();
@@ -1087,7 +1240,8 @@ function cacheElements() {
     "orderbookRows","newsFeed","newsCountChip","orderHistoryList","alertHistoryList","clearHistoryBtn",
     "portfolioTotal","portfolioPL","portfolioCash","portfolioStockValue","portfolioInvested","portfolioRate",
     "favoritesList","marketAlertBadge","watchlist","searchInput",
-    "selectedNewsTitleName","selectedNewsCount","selectedNewsFeed"
+    "selectedNewsTitleName","selectedNewsCount","selectedNewsFeed",
+    "autoSellTargetPrice","autoSellStopPrice","autoSellQty","autoSellAll","addAutoSellBtn","autoSellList"
   ].forEach(id => {
     els[id] = document.getElementById(id);
   });
@@ -1109,6 +1263,7 @@ function bindEvents() {
     btn.addEventListener("click", () => {
       state.sortBy = btn.dataset.sort;
       document.querySelectorAll(".sort-btn").forEach(b => b.classList.toggle("active", b === btn));
+      rebuildWatchlistOrder();
       renderWatchlist();
       saveState();
     });
@@ -1194,6 +1349,13 @@ function bindEvents() {
   els.pauseBtn.addEventListener("click", pauseSimulation);
   els.resumeBtn.addEventListener("click", resumeSimulation);
   els.stopBtn.addEventListener("click", stopSimulation);
+
+  els.addAutoSellBtn.addEventListener("click", addAutoSellOrder);
+  els.autoSellList.addEventListener("click", e => {
+    const btn = e.target.closest(".auto-sell-delete[data-id]");
+    if (!btn) return;
+    deleteAutoSellOrder(btn.dataset.id);
+  });
 
   els.priceChart.addEventListener("mousemove", handleChartHover);
   els.priceChart.addEventListener("mouseleave", () => {
