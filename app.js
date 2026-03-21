@@ -1,4 +1,4 @@
-const STORAGE_KEY = "k_mock_trading_pro_v11_design";
+const STORAGE_KEY = "k_mock_trading_pro_v12_final";
 const INITIAL_CASH = 1000000;
 const SUPPORT_FUND = 500000;
 const SUPPORT_FUND_LIMIT = 500000;
@@ -24,26 +24,26 @@ const STOCK_SEED = [
   { code: "KQ012", name: "트리온클라우드", logo: "트", base: 138800, theme: "클라우드" }
 ];
 
-const newsPools = {
+const NEWS_POOL = {
   breaking: [
     "{name}, 장중 수급이 몰리면서 움직임이 커지고 있어요",
-    "{name}, 거래량이 갑자기 늘면서 시장이 주목하고 있어요",
-    "{name}, 관련 테마가 함께 오르며 관심이 커지고 있어요"
+    "{name}, 거래량이 빠르게 늘면서 시장이 주목하고 있어요",
+    "{name}, 관련 테마가 함께 움직이면서 주목도가 높아졌어요"
   ],
   good: [
-    "{name}, 실적 기대감이 반영되면서 분위기가 좋아지고 있어요",
-    "{name}, 신규 계약 기대감으로 매수세가 붙는 모습이에요",
-    "{name}, 기관 관심이 커지며 흐름이 탄탄해지고 있어요"
+    "{name}, 실적 기대감이 반영되며 분위기가 좋아지고 있어요",
+    "{name}, 신규 계약 기대감이 붙으면서 매수세가 들어오고 있어요",
+    "{name}, 기관 관심이 커지며 흐름이 단단해지는 모습이에요"
   ],
   warn: [
-    "{name}, 단기 급등 뒤라 변동성이 커질 수 있어요",
-    "{name}, 고점 부근 매물 부담이 나올 수 있어 보여요",
-    "{name}, 흔들림이 커질 수 있어 너무 급하게 따라가진 않는 편이 좋아요"
+    "{name}, 단기 급등 뒤라 흔들림이 조금 커질 수 있어요",
+    "{name}, 고점 부근이라 매물 부담이 나올 수 있어 보여요",
+    "{name}, 급하게 따라붙기보단 흐름을 한 번 더 보는 편이 좋아요"
   ],
   event: [
     "{name}, 오늘 관심 종목으로 많이 언급되고 있어요",
     "{name}, 테마 이벤트가 붙으면서 수급이 몰리는 분위기예요",
-    "{name}, 검색량이 늘어나며 단기 관심이 높아지고 있어요"
+    "{name}, 검색량이 늘어나며 단기 관심이 커지고 있어요"
   ]
 };
 
@@ -86,6 +86,22 @@ function randInt(min, max) {
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
 }
+function getEl(id) {
+  return document.getElementById(id);
+}
+function setText(el, value) {
+  if (el) el.textContent = value;
+}
+function addEvent(el, type, fn) {
+  if (el) el.addEventListener(type, fn);
+}
+function queueSave() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    saveState();
+  }, 250);
+}
 function formatKRW(v) {
   return `${Math.round(v).toLocaleString("ko-KR")}원`;
 }
@@ -114,25 +130,8 @@ function typeLabel(type) {
 function feeOf(amount) {
   return Math.round(amount * FEE_RATE);
 }
-function getEl(id) {
-  return document.getElementById(id);
-}
-function text(el, value) {
-  if (el) el.textContent = value;
-}
-function addEvent(el, type, handler) {
-  if (el) el.addEventListener(type, handler);
-}
-function queueSave() {
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    saveState();
-  }, 250);
-}
-
 function getSelectedStock() {
-  return state.stocks.find(stock => stock.code === state.selectedCode) || state.stocks[0] || null;
+  return state.stocks.find(s => s.code === state.selectedCode) || state.stocks[0] || null;
 }
 function getHolding(code) {
   return state.portfolio.holdings[code] || { qty: 0, avgPrice: 0 };
@@ -140,14 +139,16 @@ function getHolding(code) {
 function getStockRate(stock) {
   return ((stock.currentPrice - stock.prevClose) / stock.prevClose) * 100;
 }
-function getInvestedAmount() {
-  return Object.values(state.portfolio.holdings).reduce((sum, item) => sum + item.qty * item.avgPrice, 0);
-}
 function getStockEvaluation() {
   return Object.entries(state.portfolio.holdings).reduce((sum, [code, holding]) => {
     const stock = state.stocks.find(s => s.code === code);
     if (!stock) return sum;
     return sum + stock.currentPrice * holding.qty;
+  }, 0);
+}
+function getInvestedAmount() {
+  return Object.values(state.portfolio.holdings).reduce((sum, holding) => {
+    return sum + holding.avgPrice * holding.qty;
   }, 0);
 }
 function getTotalAsset() {
@@ -157,7 +158,7 @@ function getProfitLoss() {
   return getTotalAsset() - INITIAL_CASH;
 }
 function getProfitRate() {
-  return INITIAL_CASH ? ((getTotalAsset() - INITIAL_CASH) / INITIAL_CASH) * 100 : 0;
+  return INITIAL_CASH > 0 ? ((getTotalAsset() - INITIAL_CASH) / INITIAL_CASH) * 100 : 0;
 }
 
 function generateCandles(base) {
@@ -189,9 +190,8 @@ function generateCandles(base) {
 }
 
 function generateOrderbook(stock) {
-  const rows = [];
   const base = Math.round(stock.currentPrice);
-
+  const rows = [];
   for (let i = 10; i >= 1; i--) {
     rows.push({
       askQty: randInt(80, 2200),
@@ -199,7 +199,6 @@ function generateOrderbook(stock) {
       bidQty: randInt(80, 2200)
     });
   }
-
   return rows;
 }
 
@@ -228,15 +227,14 @@ function createInitialState() {
   };
 
   state.stocks = STOCK_SEED.map(seed => {
-    const gen = generateCandles(seed.base);
-    const candles = gen.candles;
+    const { candles, prevClose } = generateCandles(seed.base);
     const current = candles[candles.length - 1].close;
     return {
       code: seed.code,
       name: seed.name,
       logo: seed.logo,
       theme: seed.theme,
-      prevClose: gen.prevClose,
+      prevClose,
       candles,
       currentPrice: current,
       currentVolume: candles[candles.length - 1].volume,
@@ -311,9 +309,11 @@ function sanitizeLoadedState(raw) {
   }).filter(Boolean);
 
   if (!state.stocks.length) return false;
+
   state.stocks.forEach(stock => {
     if (!stock.orderbook.length) stock.orderbook = generateOrderbook(stock);
   });
+
   if (!state.stocks.some(stock => stock.code === state.selectedCode)) {
     state.selectedCode = state.stocks[0].code;
   }
@@ -415,7 +415,7 @@ function addNews(type, stock, title, desc) {
 function createRandomNews(stock) {
   const types = ["breaking", "good", "warn", "event"];
   const type = types[randInt(0, types.length - 1)];
-  const template = newsPools[type][randInt(0, newsPools[type].length - 1)];
+  const template = NEWS_POOL[type][randInt(0, NEWS_POOL[type].length - 1)];
   addNews(
     type,
     stock,
@@ -462,11 +462,13 @@ function setSelectedStock(code) {
 function toggleFavorite() {
   const stock = getSelectedStock();
   if (!stock) return;
+
   if (state.favorites.includes(stock.code)) {
     state.favorites = state.favorites.filter(code => code !== stock.code);
   } else {
     state.favorites.push(stock.code);
   }
+
   renderHero();
   renderWatchlist();
   queueSave();
@@ -549,7 +551,7 @@ function submitOrder() {
     addAlert(`${stock.name} ${qty.toLocaleString("ko-KR")}주가 매도됐어요.`, stock);
   }
 
-  els.orderQty.value = "1";
+  if (els.orderQty) els.orderQty.value = "1";
   renderAll();
   queueSave();
 }
@@ -594,11 +596,13 @@ function addAutoSellOrder() {
     sellAll
   });
 
-  els.autoSellTargetPrice.value = "";
-  els.autoSellStopPrice.value = "";
-  els.autoSellQty.value = "1";
-  els.autoSellQty.disabled = false;
-  els.autoSellAll.checked = false;
+  if (els.autoSellTargetPrice) els.autoSellTargetPrice.value = "";
+  if (els.autoSellStopPrice) els.autoSellStopPrice.value = "";
+  if (els.autoSellQty) {
+    els.autoSellQty.value = "1";
+    els.autoSellQty.disabled = false;
+  }
+  if (els.autoSellAll) els.autoSellAll.checked = false;
 
   addAlert(`${stock.name} 자동매도가 등록됐어요.`, stock);
   renderAutoSellList();
@@ -807,6 +811,35 @@ function cacheElements() {
   });
 }
 
+function applyInputPolish() {
+  if (els.searchInput) {
+    els.searchInput.style.background = "rgba(255,255,255,.035)";
+    els.searchInput.style.color = "#fff";
+    els.searchInput.style.border = "1px solid rgba(255,255,255,.08)";
+    els.searchInput.style.outline = "none";
+  }
+  if (els.orderPrice) {
+    els.orderPrice.style.background = "rgba(255,255,255,.035)";
+    els.orderPrice.style.color = "#fff";
+  }
+  if (els.orderQty) {
+    els.orderQty.style.background = "rgba(255,255,255,.035)";
+    els.orderQty.style.color = "#fff";
+  }
+  if (els.autoSellTargetPrice) {
+    els.autoSellTargetPrice.style.background = "rgba(255,255,255,.035)";
+    els.autoSellTargetPrice.style.color = "#fff";
+  }
+  if (els.autoSellStopPrice) {
+    els.autoSellStopPrice.style.background = "rgba(255,255,255,.035)";
+    els.autoSellStopPrice.style.color = "#fff";
+  }
+  if (els.autoSellQty) {
+    els.autoSellQty.style.background = "rgba(255,255,255,.035)";
+    els.autoSellQty.style.color = "#fff";
+  }
+}
+
 function buildStockSelect() {
   if (!els.heroStockSelect) return;
   els.heroStockSelect.innerHTML = "";
@@ -854,8 +887,8 @@ function bindEvents() {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".history-tab").forEach(b => b.classList.toggle("active", b === btn));
       const type = btn.dataset.historyTab;
-      els.orderHistoryList.classList.toggle("hidden", type !== "orders");
-      els.alertHistoryList.classList.toggle("hidden", type !== "alerts");
+      if (els.orderHistoryList) els.orderHistoryList.classList.toggle("hidden", type !== "orders");
+      if (els.alertHistoryList) els.alertHistoryList.classList.toggle("hidden", type !== "alerts");
     });
   });
 
@@ -939,7 +972,7 @@ function bindEvents() {
   addEvent(els.priceChart, "mousemove", handleChartHover);
   addEvent(els.priceChart, "mouseleave", () => {
     state.hoverIndex = -1;
-    els.chartTooltip.classList.add("hidden");
+    if (els.chartTooltip) els.chartTooltip.classList.add("hidden");
     drawChart();
   });
 }
@@ -957,16 +990,19 @@ function renderStatusButtons() {
 }
 
 function renderTopSummary() {
-  text(els.totalAssetTop, formatKRW(getTotalAsset()));
+  setText(els.totalAssetTop, formatKRW(getTotalAsset()));
+
   const pl = getProfitLoss();
   if (els.profitLossTop) {
     els.profitLossTop.textContent = formatSignedKRW(pl);
     els.profitLossTop.classList.toggle("positive", pl >= 0);
     els.profitLossTop.classList.toggle("negative", pl < 0);
   }
-  text(els.cashTop, formatKRW(state.portfolio.cash));
+
+  setText(els.cashTop, formatKRW(state.portfolio.cash));
 
   if (els.supportFundBtn) {
+    els.supportFundBtn.textContent = "긴급지원금 +50만원";
     const enabled = !state.emergencyFundClaimed && state.portfolio.cash <= SUPPORT_FUND_LIMIT;
     els.supportFundBtn.disabled = !enabled;
     els.supportFundBtn.style.opacity = enabled ? "1" : ".55";
@@ -978,10 +1014,10 @@ function renderHero() {
   const stock = getSelectedStock();
   if (!stock) return;
 
-  text(els.symbolLogo, stock.logo);
-  text(els.selectedName, stock.name);
-  text(els.selectedCode, `${stock.code} · ${stock.theme}`);
-  text(els.selectedPrice, formatKRW(stock.currentPrice));
+  setText(els.symbolLogo, stock.logo);
+  setText(els.selectedName, stock.name);
+  setText(els.selectedCode, `${stock.code} · ${stock.theme}`);
+  setText(els.selectedPrice, formatKRW(stock.currentPrice));
 
   const diff = stock.currentPrice - stock.prevClose;
   const rate = getStockRate(stock);
@@ -992,16 +1028,16 @@ function renderHero() {
     els.selectedChange.classList.toggle("down", diff < 0);
   }
 
-  text(els.dayHigh, formatKRW(stock.dayHigh));
-  text(els.dayLow, formatKRW(stock.dayLow));
-  text(els.dayOpen, formatKRW(stock.prevClose));
-  text(els.dayVolume, formatVolume(stock.currentVolume));
+  setText(els.dayHigh, formatKRW(stock.dayHigh));
+  setText(els.dayLow, formatKRW(stock.dayLow));
+  setText(els.dayOpen, formatKRW(stock.prevClose));
+  setText(els.dayVolume, formatVolume(stock.currentVolume));
 
   if (els.favoriteToggleBtn) {
     els.favoriteToggleBtn.textContent = state.favorites.includes(stock.code) ? "★" : "☆";
   }
 
-  text(els.selectedNewsTitleName, stock.name);
+  setText(els.selectedNewsTitleName, stock.name);
 
   const mood = clamp(stock.mood, 0, 100);
   if (els.moodFill) els.moodFill.style.width = `${mood}%`;
@@ -1021,13 +1057,13 @@ function renderOrderPanel() {
   const currentPrice = Math.round(stock.currentPrice);
   const maxBuyQty = Math.max(0, Math.floor(state.portfolio.cash / currentPrice));
 
-  text(els.holdingQtyInline, `${holding.qty.toLocaleString("ko-KR")}주`);
-  text(els.avgPriceInline, formatKRW(holding.avgPrice || 0));
-  text(els.availableCash, formatKRW(state.portfolio.cash));
-  text(els.maxBuyQty, `${maxBuyQty.toLocaleString("ko-KR")}주`);
-  text(els.currentHoldingQty, `${holding.qty.toLocaleString("ko-KR")}주`);
-  text(els.currentAvgPrice, formatKRW(holding.avgPrice || 0));
-  text(els.currentTradePriceLabel, formatKRW(currentPrice));
+  setText(els.holdingQtyInline, `${holding.qty.toLocaleString("ko-KR")}주`);
+  setText(els.avgPriceInline, formatKRW(holding.avgPrice || 0));
+  setText(els.availableCash, formatKRW(state.portfolio.cash));
+  setText(els.maxBuyQty, `${maxBuyQty.toLocaleString("ko-KR")}주`);
+  setText(els.currentHoldingQty, `${holding.qty.toLocaleString("ko-KR")}주`);
+  setText(els.currentAvgPrice, formatKRW(holding.avgPrice || 0));
+  setText(els.currentTradePriceLabel, formatKRW(currentPrice));
 
   if (els.orderPrice) {
     els.orderPrice.value = String(currentPrice);
@@ -1093,12 +1129,10 @@ function renderOrderbook() {
   if (!stock) return;
 
   const rows = stock.orderbook;
-  const maxQty = Math.max(...rows.map(r => Math.max(r.askQty, r.bidQty)), 1);
-
   els.orderbookRows.innerHTML = rows.map((row, idx) => {
-    const sideClass = idx < 5 ? "ask" : "bid";
+    const side = idx < 5 ? "ask" : "bid";
     return `
-      <div class="order-row ${sideClass}">
+      <div class="order-row ${side}">
         <div class="order-qty left">${row.askQty.toLocaleString("ko-KR")}</div>
         <div class="order-price ${idx < 5 ? "sell-color" : "buy-color"}">${formatKRW(row.price)}</div>
         <div class="order-qty right">${row.bidQty.toLocaleString("ko-KR")}</div>
@@ -1113,7 +1147,7 @@ function renderSelectedNews() {
   if (!stock) return;
 
   const items = state.news.filter(item => item.code === stock.code).slice(0, 8);
-  text(els.selectedNewsCount, `${items.length}건`);
+  setText(els.selectedNewsCount, `${items.length}건`);
 
   if (!items.length) {
     els.selectedNewsFeed.innerHTML = `<div class="news-empty">아직 들어온 뉴스가 없어요</div>`;
@@ -1134,7 +1168,7 @@ function renderSelectedNews() {
 
 function renderNewsFeed() {
   if (!els.newsFeed) return;
-  text(els.newsCountChip, `${state.news.length}건`);
+  if (els.newsCountChip) els.newsCountChip.textContent = `${state.news.length}건`;
 
   if (!state.news.length) {
     els.newsFeed.innerHTML = `<div class="news-empty">아직 들어온 뉴스가 없어요</div>`;
@@ -1190,7 +1224,7 @@ function renderHistory() {
 }
 
 function renderPortfolio() {
-  text(els.portfolioTotal, formatKRW(getTotalAsset()));
+  setText(els.portfolioTotal, formatKRW(getTotalAsset()));
 
   const pl = getProfitLoss();
   if (els.portfolioPL) {
@@ -1199,10 +1233,10 @@ function renderPortfolio() {
     els.portfolioPL.classList.toggle("negative", pl < 0);
   }
 
-  text(els.portfolioCash, formatKRW(state.portfolio.cash));
-  text(els.portfolioStockValue, formatKRW(getStockEvaluation()));
-  text(els.portfolioInvested, formatKRW(getInvestedAmount()));
-  text(els.portfolioRate, `${getProfitRate().toFixed(2)}%`);
+  setText(els.portfolioCash, formatKRW(state.portfolio.cash));
+  setText(els.portfolioStockValue, formatKRW(getStockEvaluation()));
+  setText(els.portfolioInvested, formatKRW(getInvestedAmount()));
+  setText(els.portfolioRate, `${getProfitRate().toFixed(2)}%`);
 }
 
 function getVisibleStocks() {
@@ -1227,7 +1261,7 @@ function getVisibleStocks() {
 }
 
 function renderWatchlistMeta() {
-  text(els.marketAlertBadge, String(state.marketAlertCount || 0));
+  setText(els.marketAlertBadge, String(state.marketAlertCount || 0));
 }
 
 function renderWatchlist() {
@@ -1326,7 +1360,7 @@ function renderAutoSellList() {
 }
 
 function renderAlertBadge() {
-  text(els.alertBadge, String(state.alertCount || 0));
+  setText(els.alertBadge, String(state.alertCount || 0));
 }
 
 function compressDateLabel(ts) {
@@ -1532,6 +1566,7 @@ function startLoop() {
 function init() {
   cacheElements();
   ensureState();
+  applyInputPolish();
   bindEvents();
 
   if (els.orderQty && (!els.orderQty.value || Number(els.orderQty.value) < 1)) {
