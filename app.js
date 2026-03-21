@@ -1,4 +1,4 @@
-const STORAGE_KEY = "k_mock_trading_pro_v9_html_matched";
+const STORAGE_KEY = "k_mock_trading_pro_v10_safe";
 const INITIAL_CASH = 1000000;
 const SUPPORT_FUND = 500000;
 const SUPPORT_FUND_LIMIT = 500000;
@@ -65,6 +65,7 @@ const state = {
   isPaused: false,
   isStopped: false,
   emergencyFundClaimed: false,
+  searchTerm: "",
   stocks: [],
   favorites: [],
   news: [],
@@ -119,8 +120,30 @@ function typeLabel(type) {
 function feeOf(amount) {
   return Math.round(amount * FEE_RATE);
 }
+function safeGet(id) {
+  return document.getElementById(id);
+}
+function safeHTML(el, html) {
+  if (el) el.innerHTML = html;
+}
+function safeText(el, text) {
+  if (el) el.textContent = text;
+}
+function safeValue(el, value) {
+  if (el) el.value = value;
+}
+function safeAddEvent(el, event, handler) {
+  if (el) el.addEventListener(event, handler);
+}
+function queueSave() {
+  if (saveThrottleTimer) return;
+  saveThrottleTimer = setTimeout(() => {
+    saveThrottleTimer = null;
+    saveState();
+  }, 250);
+}
 function getSelectedStock() {
-  return state.stocks.find(s => s.code === state.selectedCode) || state.stocks[0];
+  return state.stocks.find(s => s.code === state.selectedCode) || state.stocks[0] || null;
 }
 function getHolding(code) {
   return state.portfolio.holdings[code] || { qty: 0, avgPrice: 0 };
@@ -147,13 +170,6 @@ function getProfitLoss() {
 }
 function getProfitRate() {
   return INITIAL_CASH > 0 ? ((getTotalAsset() - INITIAL_CASH) / INITIAL_CASH) * 100 : 0;
-}
-function queueSave() {
-  if (saveThrottleTimer) return;
-  saveThrottleTimer = setTimeout(() => {
-    saveThrottleTimer = null;
-    saveState();
-  }, 250);
 }
 
 function generateCandles(base) {
@@ -225,6 +241,7 @@ function buildInitialState() {
   state.sortBy = "change";
   state.chartRange = "1m";
   state.selectedCode = "KQ001";
+  state.searchTerm = "";
 
   state.stocks = STOCK_SEED.map(seed => {
     const generated = generateCandles(seed.base);
@@ -270,6 +287,7 @@ function sanitizeLoadedState(raw) {
   state.isPaused = !!raw.isPaused;
   state.isStopped = !!raw.isStopped;
   state.emergencyFundClaimed = !!raw.emergencyFundClaimed;
+  state.searchTerm = typeof raw.searchTerm === "string" ? raw.searchTerm : "";
   state.portfolio = raw.portfolio && typeof raw.portfolio === "object" ? raw.portfolio : { cash: INITIAL_CASH, holdings: {} };
 
   if (!Number.isFinite(state.portfolio.cash) || state.portfolio.cash < 0) state.portfolio.cash = INITIAL_CASH;
@@ -335,6 +353,7 @@ function saveState() {
       isPaused: state.isPaused,
       isStopped: state.isStopped,
       emergencyFundClaimed: state.emergencyFundClaimed,
+      searchTerm: state.searchTerm,
       portfolio: state.portfolio,
       stocks: state.stocks
     };
@@ -556,6 +575,7 @@ function simulateTick() {
       if (Math.abs(getStockRate(stock)) >= 29.5 && Math.random() < 0.04) {
         addAlert(`${stock.name} ${getStockRate(stock) > 0 ? "상한가 부근" : "하한가 부근"} 진입`, stock);
       }
+
       maybeGenerateNews(stock);
     });
   }
@@ -619,20 +639,31 @@ function cacheElements() {
     "autoSellTargetPrice","autoSellStopPrice","autoSellQty","autoSellAll","addAutoSellBtn","autoSellList",
     "resetBtn"
   ].forEach(id => {
-    els[id] = document.getElementById(id);
+    els[id] = safeGet(id);
   });
 }
 
-function safeAddEvent(el, event, handler) {
-  if (el) el.addEventListener(event, handler);
+function buildStockSelect() {
+  if (!els.heroStockSelect) {
+    console.warn("heroStockSelect 요소를 찾지 못했다.");
+    return;
+  }
+
+  els.heroStockSelect.innerHTML = "";
+  state.stocks.forEach(stock => {
+    const opt = document.createElement("option");
+    opt.value = stock.code;
+    opt.textContent = `${stock.name} (${stock.code})`;
+    if (stock.code === state.selectedCode) opt.selected = true;
+    els.heroStockSelect.appendChild(opt);
+  });
 }
 
 function bindEvents() {
   safeAddEvent(els.favoriteToggleBtn, "click", toggleFavorite);
   safeAddEvent(els.heroStockSelect, "change", e => setSelectedStock(e.target.value));
 
-  const speedButtons = document.getElementById("speedButtons");
-  safeAddEvent(speedButtons, "click", e => {
+  safeAddEvent(safeGet("speedButtons"), "click", e => {
     const btn = e.target.closest("button[data-speed]");
     if (!btn) return;
     state.speed = Number(btn.dataset.speed);
@@ -687,7 +718,6 @@ function bindEvents() {
   });
 
   safeAddEvent(els.orderQty, "input", renderOrderEstimate);
-  safeAddEvent(els.submitOrderBtn, "click", submitOrder);
 
   safeAddEvent(els.autoSellAll, "change", () => {
     if (!els.autoSellQty) return;
@@ -700,6 +730,7 @@ function bindEvents() {
     }
   });
 
+  safeAddEvent(els.submitOrderBtn, "click", submitOrder);
   safeAddEvent(els.addAutoSellBtn, "click", addAutoSellOrder);
 
   safeAddEvent(els.supportFundBtn, "click", claimSupportFund);
@@ -907,10 +938,7 @@ function addAutoSellOrder() {
     return;
   }
 
-  if (sellAll) {
-    qty = holding.qty;
-  }
-
+  if (sellAll) qty = holding.qty;
   if (!qty || qty <= 0) {
     addAlert("자동매도 수량을 올바르게 입력해 주세요.", stock);
     renderHistory();
@@ -970,14 +998,16 @@ function getVisibleStocks() {
 }
 
 function renderTopSummary() {
-  if (els.totalAssetTop) els.totalAssetTop.textContent = formatKRW(getTotalAsset());
+  safeText(els.totalAssetTop, formatKRW(getTotalAsset()));
+
   if (els.profitLossTop) {
     const pl = getProfitLoss();
     els.profitLossTop.textContent = formatSignedKRW(pl);
     els.profitLossTop.classList.toggle("up", pl >= 0);
     els.profitLossTop.classList.toggle("down", pl < 0);
   }
-  if (els.cashTop) els.cashTop.textContent = formatKRW(state.portfolio.cash);
+
+  safeText(els.cashTop, formatKRW(state.portfolio.cash));
 
   if (els.supportFundBtn) {
     els.supportFundBtn.textContent = "긴급지원금 +50만원";
@@ -988,28 +1018,14 @@ function renderTopSummary() {
   }
 }
 
-function renderHeroSelect() {
-  if (!els.heroStockSelect) return;
-
-  const current = state.selectedCode;
-  els.heroStockSelect.innerHTML = "";
-  state.stocks.forEach(stock => {
-    const opt = document.createElement("option");
-    opt.value = stock.code;
-    opt.textContent = `${stock.name} (${stock.code})`;
-    if (stock.code === current) opt.selected = true;
-    els.heroStockSelect.appendChild(opt);
-  });
-}
-
 function renderHero() {
   const stock = getSelectedStock();
   if (!stock) return;
 
-  if (els.symbolLogo) els.symbolLogo.textContent = stock.logo;
-  if (els.selectedName) els.selectedName.textContent = stock.name;
-  if (els.selectedCode) els.selectedCode.textContent = `${stock.code} · ${stock.theme}`;
-  if (els.selectedPrice) els.selectedPrice.textContent = formatKRW(stock.currentPrice);
+  safeText(els.symbolLogo, stock.logo);
+  safeText(els.selectedName, stock.name);
+  safeText(els.selectedCode, `${stock.code} · ${stock.theme}`);
+  safeText(els.selectedPrice, formatKRW(stock.currentPrice));
 
   const diff = stock.currentPrice - stock.prevClose;
   const rate = getStockRate(stock);
@@ -1019,16 +1035,16 @@ function renderHero() {
     els.selectedChange.classList.toggle("down", diff < 0);
   }
 
-  if (els.dayHigh) els.dayHigh.textContent = formatKRW(stock.dayHigh);
-  if (els.dayLow) els.dayLow.textContent = formatKRW(stock.dayLow);
-  if (els.dayOpen) els.dayOpen.textContent = formatKRW(stock.prevClose);
-  if (els.dayVolume) els.dayVolume.textContent = formatVolume(stock.currentVolume);
+  safeText(els.dayHigh, formatKRW(stock.dayHigh));
+  safeText(els.dayLow, formatKRW(stock.dayLow));
+  safeText(els.dayOpen, formatKRW(stock.prevClose));
+  safeText(els.dayVolume, formatVolume(stock.currentVolume));
 
   if (els.favoriteToggleBtn) {
     els.favoriteToggleBtn.textContent = state.favorites.includes(stock.code) ? "★" : "☆";
   }
 
-  if (els.selectedNewsTitleName) els.selectedNewsTitleName.textContent = stock.name;
+  safeText(els.selectedNewsTitleName, stock.name);
 
   const mood = clamp(stock.mood, 0, 100);
   if (els.moodFill) els.moodFill.style.width = `${mood}%`;
@@ -1060,12 +1076,12 @@ function renderOrderPanel() {
   const currentPrice = Math.round(stock.currentPrice);
   const maxBuyQty = Math.max(0, Math.floor(state.portfolio.cash / (currentPrice + feeOf(currentPrice))));
 
-  if (els.holdingQtyInline) els.holdingQtyInline.textContent = `${holding.qty.toLocaleString("ko-KR")}주`;
-  if (els.avgPriceInline) els.avgPriceInline.textContent = formatKRW(holding.avgPrice || 0);
-  if (els.availableCash) els.availableCash.textContent = formatKRW(state.portfolio.cash);
-  if (els.maxBuyQty) els.maxBuyQty.textContent = `${maxBuyQty.toLocaleString("ko-KR")}주`;
-  if (els.currentHoldingQty) els.currentHoldingQty.textContent = `${holding.qty.toLocaleString("ko-KR")}주`;
-  if (els.currentAvgPrice) els.currentAvgPrice.textContent = formatKRW(holding.avgPrice || 0);
+  safeText(els.holdingQtyInline, `${holding.qty.toLocaleString("ko-KR")}주`);
+  safeText(els.avgPriceInline, formatKRW(holding.avgPrice || 0));
+  safeText(els.availableCash, formatKRW(state.portfolio.cash));
+  safeText(els.maxBuyQty, `${maxBuyQty.toLocaleString("ko-KR")}주`);
+  safeText(els.currentHoldingQty, `${holding.qty.toLocaleString("ko-KR")}주`);
+  safeText(els.currentAvgPrice, formatKRW(holding.avgPrice || 0));
 
   if (els.orderPrice) {
     els.orderPrice.value = String(currentPrice);
@@ -1122,7 +1138,7 @@ function renderOrderEstimate() {
     const viewAmount = state.orderMode === "buy" ? amount + fee : amount - fee;
     els.estimatedCost.textContent = formatKRW(viewAmount);
   }
-  if (els.estimatedFee) els.estimatedFee.textContent = formatKRW(fee);
+  safeText(els.estimatedFee, formatKRW(fee));
 }
 
 function renderOrderbook() {
@@ -1139,6 +1155,7 @@ function renderOrderbook() {
   for (let i = 0; i < 10; i++) {
     const ask = asks[i];
     const bid = bids[i];
+    if (!ask || !bid) continue;
 
     const row = document.createElement("div");
     row.className = "orderbook-row";
@@ -1217,12 +1234,12 @@ function renderHistory() {
 }
 
 function renderPortfolio() {
-  if (els.portfolioTotal) els.portfolioTotal.textContent = formatKRW(getTotalAsset());
-  if (els.portfolioPL) els.portfolioPL.textContent = formatSignedKRW(getProfitLoss());
-  if (els.portfolioCash) els.portfolioCash.textContent = formatKRW(state.portfolio.cash);
-  if (els.portfolioStockValue) els.portfolioStockValue.textContent = formatKRW(getStockEvaluation());
-  if (els.portfolioInvested) els.portfolioInvested.textContent = formatKRW(getInvestedAmount());
-  if (els.portfolioRate) els.portfolioRate.textContent = `${getProfitRate().toFixed(2)}%`;
+  safeText(els.portfolioTotal, formatKRW(getTotalAsset()));
+  safeText(els.portfolioPL, formatSignedKRW(getProfitLoss()));
+  safeText(els.portfolioCash, formatKRW(state.portfolio.cash));
+  safeText(els.portfolioStockValue, formatKRW(getStockEvaluation()));
+  safeText(els.portfolioInvested, formatKRW(getInvestedAmount()));
+  safeText(els.portfolioRate, `${getProfitRate().toFixed(2)}%`);
 }
 
 function renderWatchlist() {
@@ -1231,7 +1248,7 @@ function renderWatchlist() {
   const marketAlertBadge = els.marketAlertBadge;
   const visibleStocks = getVisibleStocks();
 
-  if (marketAlertBadge) marketAlertBadge.textContent = String(state.marketAlertCount || 0);
+  safeText(marketAlertBadge, String(state.marketAlertCount || 0));
 
   if (favoritesEl) {
     const favs = visibleStocks.filter(s => state.favorites.includes(s.code));
@@ -1308,7 +1325,7 @@ function renderAutoSellList() {
 }
 
 function renderAlertBadges() {
-  if (els.alertBadge) els.alertBadge.textContent = String(state.alertCount || 0);
+  safeText(els.alertBadge, String(state.alertCount || 0));
 }
 
 function compressDateLabel(ts) {
@@ -1454,8 +1471,9 @@ function handleChartHover(e) {
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const stock = getSelectedStock();
-  const candles = getDisplayCandles(stock);
+  if (!stock) return;
 
+  const candles = getDisplayCandles(stock);
   const padLeft = 70;
   const padRight = 76;
   const chartWidth = CANVAS_W - padLeft - padRight;
@@ -1473,8 +1491,8 @@ function handleChartHover(e) {
 }
 
 function renderAll() {
+  buildStockSelect();
   renderTopSummary();
-  renderHeroSelect();
   renderHero();
   updateSpeedButtons();
   renderStatusButtons();
@@ -1499,7 +1517,6 @@ function ensureSafeStartup() {
   if (!state.stocks.length) {
     buildInitialState();
     saveState();
-    return;
   }
 }
 
