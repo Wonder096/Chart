@@ -98,7 +98,7 @@
                 <div class="mood-bar">
                   <div id="moodFill"></div>
                 </div>
-                <div class="mood-text" id="moodText">중립이에요</div>
+                <div class="mood-text" id="moodText">지금은 중립적인 분위기예요</div>
               </div>
             </div>
           </div>
@@ -318,27 +318,24 @@
         <div class="panel watchlist-panel">
           <div class="panel-head watchlist-top">
             <h2>관심종목</h2>
-
             <div class="sort-row">
-              <button class="sort-btn active" type="button" data-sort="change">등락률순</button>
-              <button class="sort-btn" type="button" data-sort="volume">거래량순</button>
+              <button type="button" class="sort-btn active" data-sort="change">등락률순</button>
+              <button type="button" class="sort-btn" data-sort="volume">거래량순</button>
             </div>
           </div>
 
-          <div class="search-box">
+          <div class="filter-row">
             <input type="text" id="searchInput" placeholder="종목 검색" />
           </div>
 
-          <div class="favorites-block">
-            <div class="favorites-title">즐겨찾기</div>
-            <div id="favoritesList" class="favorites-list"></div>
-          </div>
+          <div class="section-subtitle">즐겨찾기</div>
+          <div id="favoritesList" class="watchlist-block empty-state-box">즐겨찾기한 종목이 아직 없어요</div>
 
-          <div class="watchlist-meta">
-            <span>전체 종목 <b id="marketAlertBadge">0</b></span>
+          <div class="section-subtitle with-badge">
+            전체 종목
+            <span class="badge inline-badge" id="marketAlertBadge">0</span>
           </div>
-
-          <div class="watchlist" id="watchlist"></div>
+          <div id="watchlist" class="watchlist"></div>
         </div>
       </aside>
     </main>
