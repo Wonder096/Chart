@@ -94,11 +94,11 @@
               </div>
 
               <div>
-                <div class="section-label">시장심리</div>
+                <div class="section-label">시장 심리</div>
                 <div class="mood-bar">
                   <div id="moodFill"></div>
                 </div>
-                <div class="mood-text" id="moodText">중립</div>
+                <div class="mood-text" id="moodText">중립이에요</div>
               </div>
             </div>
           </div>
@@ -110,10 +110,10 @@
               <div class="panel-left-head">
                 <h2>차트</h2>
                 <div class="chart-tabs">
-                  <button type="button" class="tab-btn active" data-chart-range="1m">1분</button>
-                  <button type="button" class="tab-btn" data-chart-range="5m">5분</button>
-                  <button type="button" class="tab-btn" data-chart-range="1d">일</button>
-                  <button type="button" class="tab-btn" data-chart-range="1w">주</button>
+                  <button class="tab-btn active" data-chart-range="1m" type="button">1분</button>
+                  <button class="tab-btn" data-chart-range="5m" type="button">5분</button>
+                  <button class="tab-btn" data-chart-range="1d" type="button">일</button>
+                  <button class="tab-btn" data-chart-range="1w" type="button">주</button>
                 </div>
               </div>
 
@@ -173,21 +173,22 @@
               </div>
 
               <div class="trade-fields-card">
-                <div class="trade-price-badge">
+                <div class="readonly-price-box">
                   <span>현재가 기준 체결</span>
-                  <b id="livePriceText">0원</b>
+                  <b id="currentTradePriceLabel">0원</b>
                 </div>
 
-                <div class="trade-fields-grid">
+                <div class="form-grid">
                   <div class="form-group">
                     <label for="orderPrice">주문 가격</label>
-                    <input id="orderPrice" class="readonly-input" type="number" min="1" step="1" readonly />
-                    <small>직접 수정 불가 · 현재가로만 체결</small>
+                    <input id="orderPrice" type="number" min="1" step="1" />
+                    <small>현재가에 맞춰 자동으로 들어가요</small>
                   </div>
 
                   <div class="form-group">
                     <label for="orderQty">수량</label>
                     <input id="orderQty" type="number" min="1" step="1" value="1" />
+                    <small>주문할 수량을 입력해 주세요</small>
                   </div>
                 </div>
 
@@ -201,49 +202,41 @@
                 <button class="primary-order-btn buy" id="submitOrderBtn" type="button">매수 실행</button>
               </div>
 
-              <div class="auto-sell-block" id="autoSellBlock">
+              <div class="auto-sell-block">
                 <div class="auto-sell-head">
-                  <div>
-                    <h3>자동매도 설정</h3>
-                    <p>매도 모드에서만 등록 가능</p>
+                  <h3>예약판매 · 자동매도</h3>
+                  <p>원하는 가격이 오거나 내려오면 자동으로 팔 수 있어요</p>
+                </div>
+
+                <div class="auto-sell-grid">
+                  <div class="form-group">
+                    <label for="autoSellTargetPrice">목표가</label>
+                    <input id="autoSellTargetPrice" type="number" min="1" step="1" placeholder="예: 52000" />
+                  </div>
+
+                  <div class="form-group">
+                    <label for="autoSellStopPrice">손절가</label>
+                    <input id="autoSellStopPrice" type="number" min="1" step="1" placeholder="예: 45000" />
+                  </div>
+
+                  <div class="form-group">
+                    <label for="autoSellQty">수량</label>
+                    <input id="autoSellQty" type="number" min="1" step="1" value="1" />
+                  </div>
+
+                  <div class="checkbox-group">
+                    <label class="checkbox-label">
+                      <input id="autoSellAll" type="checkbox" />
+                      <span>전량으로 팔기</span>
+                    </label>
                   </div>
                 </div>
 
-                <div class="auto-sell-card">
-                  <div class="auto-sell-grid">
-                    <div class="form-group">
-                      <label for="autoSellTargetPrice">목표가</label>
-                      <input id="autoSellTargetPrice" type="number" min="1" step="1" placeholder="예: 70000" />
-                    </div>
-
-                    <div class="form-group">
-                      <label for="autoSellStopPrice">손절가</label>
-                      <input id="autoSellStopPrice" type="number" min="1" step="1" placeholder="예: 52000" />
-                    </div>
-                  </div>
-
-                  <div class="auto-sell-grid">
-                    <div class="form-group">
-                      <label for="autoSellQty">수량</label>
-                      <input id="autoSellQty" type="number" min="1" step="1" value="1" />
-                    </div>
-
-                    <div class="form-group">
-                      <label>전량매도</label>
-                      <label class="check-tile">
-                        <input id="autoSellAll" type="checkbox" />
-                        <span class="check-indicator"></span>
-                        <span>보유 수량 전체 매도</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <button class="auto-sell-add-btn" id="addAutoSellBtn" type="button">자동매도 등록</button>
-                </div>
+                <button class="auto-sell-add-btn" id="addAutoSellBtn" type="button">자동매도 등록</button>
 
                 <div class="auto-sell-list-wrap">
-                  <div class="auto-sell-list-head">등록 목록</div>
-                  <div id="autoSellList" class="auto-sell-list"></div>
+                  <div class="auto-sell-list-head">등록된 자동매도</div>
+                  <div class="auto-sell-list" id="autoSellList"></div>
                 </div>
               </div>
             </div>
@@ -251,7 +244,7 @@
             <div class="panel orderbook-panel">
               <div class="panel-head">
                 <h2>호가창</h2>
-                <div class="live-chip">실시간</div>
+                <span class="live-chip">실시간</span>
               </div>
 
               <div class="orderbook-head">
@@ -259,7 +252,7 @@
                 <span>가격</span>
                 <span>매수</span>
               </div>
-              <div id="orderbookRows" class="orderbook-rows"></div>
+              <div class="orderbook-rows" id="orderbookRows"></div>
             </div>
           </div>
         </div>
@@ -267,26 +260,26 @@
         <div class="bottom-grid">
           <div class="panel news-panel">
             <div class="panel-head">
-              <h2>전체 뉴스 · 속보 · 이벤트</h2>
-              <div class="small-chip" id="newsCountChip">0건</div>
+              <h2>뉴스 피드</h2>
+              <span class="small-chip" id="newsCountChip">0건</span>
             </div>
-            <div id="newsFeed" class="news-feed"></div>
+            <div class="news-feed" id="newsFeed"></div>
           </div>
 
           <div class="panel history-panel">
             <div class="panel-head">
               <div class="panel-left-head">
-                <h2>내 기록</h2>
+                <h2>기록</h2>
                 <div class="history-tabs">
-                  <button type="button" class="history-tab active" data-history-tab="orders">주문 기록</button>
-                  <button type="button" class="history-tab" data-history-tab="alerts">알림 기록</button>
+                  <button class="history-tab active" type="button" data-history-tab="orders">주문</button>
+                  <button class="history-tab" type="button" data-history-tab="alerts">알림</button>
                 </div>
               </div>
               <button class="ghost-btn" id="clearHistoryBtn" type="button">기록 비우기</button>
             </div>
 
-            <div id="orderHistoryList" class="history-list"></div>
-            <div id="alertHistoryList" class="history-list hidden"></div>
+            <div class="history-list" id="orderHistoryList"></div>
+            <div class="history-list hidden" id="alertHistoryList"></div>
           </div>
         </div>
       </section>
@@ -325,24 +318,27 @@
         <div class="panel watchlist-panel">
           <div class="panel-head watchlist-top">
             <h2>관심종목</h2>
+
             <div class="sort-row">
-              <button type="button" class="sort-btn active" data-sort="change">등락률순</button>
-              <button type="button" class="sort-btn" data-sort="volume">거래량순</button>
+              <button class="sort-btn active" type="button" data-sort="change">등락률순</button>
+              <button class="sort-btn" type="button" data-sort="volume">거래량순</button>
             </div>
           </div>
 
-          <div class="filter-row">
+          <div class="search-box">
             <input type="text" id="searchInput" placeholder="종목 검색" />
           </div>
 
-          <div class="section-subtitle">즐겨찾기</div>
-          <div id="favoritesList" class="watchlist-block empty-state-box">즐겨찾기한 종목이 없다</div>
-
-          <div class="section-subtitle with-badge">
-            전체 종목
-            <span class="badge inline-badge" id="marketAlertBadge">0</span>
+          <div class="favorites-block">
+            <div class="favorites-title">즐겨찾기</div>
+            <div id="favoritesList" class="favorites-list"></div>
           </div>
-          <div id="watchlist" class="watchlist"></div>
+
+          <div class="watchlist-meta">
+            <span>전체 종목 <b id="marketAlertBadge">0</b></span>
+          </div>
+
+          <div class="watchlist" id="watchlist"></div>
         </div>
       </aside>
     </main>
