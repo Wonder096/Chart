@@ -472,7 +472,7 @@ select option{
 
 .toss-main-grid{
   display:grid;
-  grid-template-columns:minmax(0,1.9fr) minmax(360px,.95fr) minmax(320px,.92fr) minmax(340px,.95fr);
+  grid-template-columns:minmax(0,2fr) minmax(380px,1fr) minmax(330px,.92fr) minmax(340px,.95fr);
   gap:18px;
   align-items:start;
 }
@@ -558,8 +558,8 @@ select option{
 
 .chart-wrap{
   position:relative;
-  
-  min-height:760px;
+  height:820px;
+  min-height:820px;
   border-radius:18px;
   overflow:hidden;
 }
@@ -581,14 +581,6 @@ select option{
   line-height:1.6;
   pointer-events:none;
   z-index:5;
-}
-
-.chart-wrap{
-  position:relative;
-  height:760px;
-  min-height:760px;
-  border-radius:18px;
-  overflow:hidden;
 }
 
 .chart-xhint{
@@ -1032,7 +1024,7 @@ select option{
   display:flex;
   flex-direction:column;
   gap:8px;
-  max-height:620px;
+  max-height:560px;
   overflow:auto;
   padding-right:4px;
 }
@@ -1084,6 +1076,42 @@ select option{
 }
 .strength-sell{background:linear-gradient(90deg, rgba(255,95,130,.75), rgba(255,95,130,.45))}
 .strength-buy{background:linear-gradient(90deg, rgba(79,149,255,.45), rgba(79,149,255,.75))}
+
+.holding-under-book{
+  margin-top:14px;
+  padding-top:14px;
+  border-top:1px solid rgba(255,255,255,.07);
+}
+.holding-under-title{
+  font-size:12px;
+  color:var(--muted);
+  font-weight:800;
+  margin-bottom:10px;
+}
+.holding-under-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+.holding-under-card{
+  min-height:72px;
+  padding:12px 14px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.06);
+  background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.018));
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+}
+.holding-under-card span{
+  font-size:11px;
+  color:var(--muted);
+  font-weight:700;
+}
+.holding-under-card b{
+  font-size:16px;
+  font-weight:900;
+}
 
 .toss-side-panel{
   display:flex;
@@ -1533,14 +1561,16 @@ select option{
   .portfolio-actions,
   .admin-grid,
   .admin-stock-box,
-  .admin-actions{
+  .admin-actions,
+  .holding-under-grid{
     grid-template-columns:1fr;
   }
   .quick-row{
     grid-template-columns:repeat(2,1fr);
   }
   .chart-wrap{
-    min-height:480px;
+    height:520px;
+    min-height:520px;
   }
   .main-price{
     font-size:44px;
