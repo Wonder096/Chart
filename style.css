@@ -558,13 +558,14 @@ select option{
 
 .chart-wrap{
   position:relative;
+  
   min-height:760px;
   border-radius:18px;
   overflow:hidden;
 }
 #priceChart{
   width:100%;
-  height:auto;
+  height:100%;
   display:block;
 }
 .chart-tooltip{
@@ -584,6 +585,7 @@ select option{
 
 .chart-wrap{
   position:relative;
+  height:760px;
   min-height:760px;
   border-radius:18px;
   overflow:hidden;
