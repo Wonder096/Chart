@@ -558,7 +558,7 @@ select option{
 
 .chart-wrap{
   position:relative;
-  min-height:640px;
+  min-height:760px;
   border-radius:18px;
   overflow:hidden;
 }
@@ -582,15 +582,24 @@ select option{
   z-index:5;
 }
 
+.chart-wrap{
+  position:relative;
+  min-height:760px;
+  border-radius:18px;
+  overflow:hidden;
+}
+
 .chart-xhint{
   display:grid;
   grid-template-columns:repeat(6,1fr);
   gap:8px;
-  margin-top:10px;
+  margin-top:12px;
   color:#95abd4;
   font-size:12px;
   font-weight:800;
   text-align:center;
+  min-height:20px;
+  align-items:center;
 }
 
 .chart-under-grid{
