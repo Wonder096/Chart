@@ -1183,17 +1183,21 @@ function renderSpeedButtons() {
   if (!els.speedButtons) return;
   const all = allowedSpeeds();
   els.speedButtons.innerHTML = "";
+
   all.forEach(spd => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = `${spd}x`;
     if (state.speed === spd) btn.classList.add("active");
+
     btn.addEventListener("click", () => {
       state.speed = spd;
       queueSave();
       renderSpeedButtons();
+      renderChartXAxisHint();
       toast(`속도가 ${spd}x로 변경됐어요`, "event");
     });
+
     els.speedButtons.appendChild(btn);
   });
 }
@@ -1308,7 +1312,7 @@ function renderChart() {
   const ma20 = movingAverage(series, 20);
   const ma60 = movingAverage(series, 60);
 
-  const pad = { top: 26, right: 24, bottom: 34, left: 66 };
+  const pad = { top: 18, right: 18, bottom: 24, left: 66 };
   const w = cssWidth - pad.left - pad.right;
   const h = cssHeight - pad.top - pad.bottom;
 
@@ -1386,6 +1390,60 @@ function renderChart() {
   ctx.fill();
 
   canvas._chartMeta = { series, xAt, yAt, pad, cssWidth, cssHeight };
+}
+
+function renderChartXAxisHint() {
+  if (!els.chartXAxisHint) return;
+
+  const stock = selectedStock();
+  if (!stock) {
+    els.chartXAxisHint.innerHTML = "";
+    return;
+  }
+
+  const series = getChartSeries(stock);
+  const count = Math.max(6, Math.min(6, series.length || 6));
+  const baseTime = state.virtualTime || Date.now();
+
+  const minuteSpanMap = {
+    "1m": 1,
+    "5m": 5,
+    "1d": 30,
+    "1w": 180,
+    "1y": 1440,
+    "10y": 10080,
+    "100y": 43200
+  };
+
+  const unitMinutes = minuteSpanMap[state.chartRange] || 1;
+  const totalMinutes = unitMinutes * Math.max(1, series.length - 1);
+
+  const labels = [];
+  for (let i = 0; i < 6; i++) {
+    const ratio = i / 5;
+    const offsetMinutes = Math.round(totalMinutes * (1 - ratio));
+    const ts = baseTime - (offsetMinutes * 60 * 1000);
+    const d = new Date(ts);
+
+    let label = "";
+    if (state.chartRange === "1m" || state.chartRange === "5m") {
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      label = `${hh}:${mm}`;
+    } else if (state.chartRange === "1d" || state.chartRange === "1w") {
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      label = `${mm}/${dd}`;
+    } else {
+      const yy = String(d.getFullYear()).slice(2);
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      label = `${yy}.${mm}`;
+    }
+
+    labels.push(label);
+  }
+
+  els.chartXAxisHint.innerHTML = labels.map(v => `<span>${v}</span>`).join("");
 }
 
 function bindChartHover() {
@@ -2285,6 +2343,7 @@ function renderAll() {
   renderChartTabs();
   renderHero();
   renderChart();
+  renderChartXAxisHint();
   renderPortfolio();
   renderWatchlists();
   renderNewsFeed();
@@ -2298,21 +2357,46 @@ function renderAll() {
 function tickLoop() {
   if (state.isPaused || state.isStopped) return;
 
-  rollVirtualTime();
-  for (const stock of state.stocks) {
-    updateOneStock(stock);
+  const loopMap = {
+    1: 1,
+    2: 2,
+    5: 4,
+    10: 6,
+    20: 10,
+    50: 18,
+    100: 30,
+    200: 55,
+    300: 80
+  };
+
+  const loops = loopMap[state.speed] || 1;
+
+  for (let step = 0; step < loops; step++) {
+    rollVirtualTime();
+
+    for (const stock of state.stocks) {
+      updateOneStock(stock);
+    }
+
+    processAutoOrders();
   }
-  processAutoOrders();
 
   state.chartRenderCounter += 1;
+
   renderHero();
   renderPortfolio();
   renderWatchlists();
   renderNewsFeed();
   renderHistory();
+  renderQuoteTable();
+  renderInvestorPanel();
+  renderOrderbook();
+  renderChartXAxisHint();
 
   const chartSkip = state.speed >= 200 ? 4 : state.speed >= 100 ? 3 : state.speed >= 20 ? 2 : 1;
-  if (state.chartRenderCounter % chartSkip === 0) renderChart();
+  if (state.chartRenderCounter % chartSkip === 0) {
+    renderChart();
+  }
 
   queueSave();
 }
