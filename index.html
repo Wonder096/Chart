@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>K-모의증권 Pro</title>
+  <title>주식 모의증권</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -12,8 +12,8 @@
       <div class="brand-box">
         <div class="brand-icon">₩</div>
         <div>
-          <div class="brand-title">K-모의증권 Pro</div>
-          <div class="brand-sub">GitHub Pages Edition · Advanced Dark Trading UI</div>
+          <div class="brand-title">주식 모의증권</div>
+          <div class="brand-sub">Dark Trading UI</div>
         </div>
       </div>
 
@@ -39,6 +39,9 @@
           <button class="top-action-btn control-btn" id="resumeBtn" type="button">재개</button>
           <button class="top-action-btn control-btn danger-btn" id="stopBtn" type="button">정지</button>
           <button class="top-action-btn control-btn reset-btn" id="resetBtn" type="button">초기화</button>
+          <button class="top-action-btn control-btn" id="saveSlotBtn" type="button">저장</button>
+          <button class="top-action-btn control-btn" id="loadSlotBtn" type="button">불러오기</button>
+          <button class="top-action-btn control-btn" id="adminEntryBtn" type="button">관리자</button>
           <button class="icon-btn alert-btn" id="alertBellBtn" type="button" title="알림">
             🔔
             <span class="badge" id="alertBadge">0</span>
@@ -71,7 +74,7 @@
 
             <div class="hero-price">
               <div class="main-price" id="selectedPrice">0원</div>
-              <div class="main-change" id="selectedChange">+0원 (0.00%)</div>
+              <div class="main-change" id="selectedChange">+0원 (+0.00%)</div>
               <div class="hero-kpis">
                 <span>고가 <b id="dayHigh">0원</b></span>
                 <span>저가 <b id="dayLow">0원</b></span>
@@ -83,14 +86,7 @@
             <div class="hero-side">
               <div>
                 <div class="section-label">속도</div>
-                <div class="speed-grid" id="speedButtons">
-                  <button type="button" data-speed="1" class="active">1x</button>
-                  <button type="button" data-speed="2">2x</button>
-                  <button type="button" data-speed="5">5x</button>
-                  <button type="button" data-speed="10">10x</button>
-                  <button type="button" data-speed="20">20x</button>
-                  <button type="button" data-speed="50">50x</button>
-                </div>
+                <div class="speed-grid" id="speedButtons"></div>
               </div>
 
               <div>
@@ -109,12 +105,7 @@
             <div class="panel-head">
               <div class="panel-left-head">
                 <h2>차트</h2>
-                <div class="chart-tabs">
-                  <button class="tab-btn active" data-chart-range="1m" type="button">1분</button>
-                  <button class="tab-btn" data-chart-range="5m" type="button">5분</button>
-                  <button class="tab-btn" data-chart-range="1d" type="button">일</button>
-                  <button class="tab-btn" data-chart-range="1w" type="button">주</button>
-                </div>
+                <div class="chart-tabs" id="chartTabs"></div>
               </div>
 
               <div class="ma-legend">
@@ -125,7 +116,7 @@
             </div>
 
             <div class="chart-wrap">
-              <canvas id="priceChart" width="1280" height="700"></canvas>
+              <canvas id="priceChart" width="1280" height="760"></canvas>
               <div class="chart-tooltip hidden" id="chartTooltip"></div>
             </div>
 
@@ -182,7 +173,7 @@
                   <div class="form-group">
                     <label for="orderPrice">주문 가격</label>
                     <input id="orderPrice" type="number" min="1" step="1" />
-                    <small>현재가에 맞춰 자동으로 들어가요</small>
+                    <small>항상 현재가로 체결돼요</small>
                   </div>
 
                   <div class="form-group">
@@ -204,39 +195,74 @@
 
               <div class="auto-sell-block">
                 <div class="auto-sell-head">
-                  <h3>예약판매 · 자동매도</h3>
-                  <p>원하는 가격이 오거나 내려오면 자동으로 팔 수 있어요</p>
+                  <h3 id="autoModeTitle">예약구매 · 조건매수</h3>
+                  <p id="autoModeDesc">원하는 가격까지 내려오면 자동으로 매수할 수 있어요</p>
                 </div>
 
-                <div class="auto-sell-grid">
-                  <div class="form-group">
-                    <label for="autoSellTargetPrice">목표가</label>
-                    <input id="autoSellTargetPrice" type="number" min="1" step="1" placeholder="예: 52000" />
+                <div id="autoBuyModeBox">
+                  <div class="auto-sell-grid">
+                    <div class="form-group">
+                      <label for="autoBuyTargetPrice">목표 매수가</label>
+                      <input id="autoBuyTargetPrice" type="number" min="1" step="1" placeholder="예: 43000" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="autoBuyQty">수량</label>
+                      <input id="autoBuyQty" type="number" min="1" step="1" value="1" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="autoBuyBudget">예산 제한</label>
+                      <input id="autoBuyBudget" type="number" min="0" step="1" placeholder="비워두면 제한 없음" />
+                    </div>
+
+                    <div class="checkbox-group">
+                      <label class="checkbox-label">
+                        <input id="autoBuyMax" type="checkbox" />
+                        <span>가능한 최대 수량</span>
+                      </label>
+                    </div>
                   </div>
 
-                  <div class="form-group">
-                    <label for="autoSellStopPrice">손절가</label>
-                    <input id="autoSellStopPrice" type="number" min="1" step="1" placeholder="예: 45000" />
-                  </div>
+                  <button class="auto-sell-add-btn" id="addAutoBuyBtn" type="button">예약구매 등록</button>
 
-                  <div class="form-group">
-                    <label for="autoSellQty">수량</label>
-                    <input id="autoSellQty" type="number" min="1" step="1" value="1" />
-                  </div>
-
-                  <div class="checkbox-group">
-                    <label class="checkbox-label">
-                      <input id="autoSellAll" type="checkbox" />
-                      <span>전량으로 팔기</span>
-                    </label>
+                  <div class="auto-sell-list-wrap">
+                    <div class="auto-sell-list-head">등록된 예약구매</div>
+                    <div class="auto-sell-list" id="autoBuyList"></div>
                   </div>
                 </div>
 
-                <button class="auto-sell-add-btn" id="addAutoSellBtn" type="button">자동매도 등록</button>
+                <div id="autoSellModeBox" class="hidden">
+                  <div class="auto-sell-grid">
+                    <div class="form-group">
+                      <label for="autoSellTargetPrice">목표가</label>
+                      <input id="autoSellTargetPrice" type="number" min="0" step="1" placeholder="예: 52000" />
+                    </div>
 
-                <div class="auto-sell-list-wrap">
-                  <div class="auto-sell-list-head">등록된 자동매도</div>
-                  <div class="auto-sell-list" id="autoSellList"></div>
+                    <div class="form-group">
+                      <label for="autoSellStopPrice">손절가</label>
+                      <input id="autoSellStopPrice" type="number" min="0" step="1" placeholder="예: 45000" />
+                    </div>
+
+                    <div class="form-group">
+                      <label for="autoSellQty">수량</label>
+                      <input id="autoSellQty" type="number" min="1" step="1" value="1" />
+                    </div>
+
+                    <div class="checkbox-group">
+                      <label class="checkbox-label">
+                        <input id="autoSellAll" type="checkbox" />
+                        <span>전량 사용</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <button class="auto-sell-add-btn" id="addAutoSellBtn" type="button">예약판매 등록</button>
+
+                  <div class="auto-sell-list-wrap">
+                    <div class="auto-sell-list-head">등록된 예약판매</div>
+                    <div class="auto-sell-list" id="autoSellList"></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -252,7 +278,7 @@
                 <span>가격</span>
                 <span>매수</span>
               </div>
-              <div class="orderbook-rows" id="orderbookRows"></div>
+              <div id="orderbookRows" class="orderbook-rows"></div>
             </div>
           </div>
         </div>
@@ -313,6 +339,30 @@
               <b id="portfolioRate">0.00%</b>
             </div>
           </div>
+
+          <div id="portfolioExtraBox" class="portfolio-grid">
+            <div class="portfolio-card">
+              <span>전체 수익률</span>
+              <b id="portfolioAbsoluteRate">0.00%</b>
+            </div>
+            <div class="portfolio-card">
+              <span>실현손익</span>
+              <b id="portfolioRealized">0원</b>
+            </div>
+            <div class="portfolio-card">
+              <span>기준선 이후</span>
+              <b id="portfolioBaselineRate">0.00%</b>
+            </div>
+            <div class="portfolio-card">
+              <span>평가손익</span>
+              <b id="portfolioUnrealized">0원</b>
+            </div>
+          </div>
+
+          <div class="portfolio-actions">
+            <button class="top-action-btn control-btn" id="resetBaselineBtn" type="button">수익률 기준 리셋</button>
+            <button class="top-action-btn control-btn" id="toggleActiveOrdersBtn" type="button">자동매매 비우기</button>
+          </div>
         </div>
 
         <div class="panel watchlist-panel">
@@ -339,6 +389,87 @@
         </div>
       </aside>
     </main>
+  </div>
+
+  <div id="adminOverlay" class="hidden">
+    <div id="adminModal">
+      <div class="admin-header">
+        <div>
+          <div class="admin-title">관리자 패널</div>
+          <div class="admin-sub">가격 조정 · 상하한 · 고정가 · 시장 설정</div>
+        </div>
+        <button id="closeAdminModalBtn" class="top-action-btn control-btn" type="button">닫기</button>
+      </div>
+
+      <div id="adminLoginBox">
+        <div class="admin-login-row">
+          <input id="adminCodeInput" type="password" placeholder="관리자 코드 입력" />
+          <button id="adminLoginBtn" class="top-action-btn control-btn" type="button">입장</button>
+        </div>
+      </div>
+
+      <div id="adminPanelBox" class="hidden">
+        <div class="admin-grid">
+          <label>초기 자산
+            <input id="adminInitialCash" type="number" min="10000" step="1000" />
+          </label>
+          <label>긴급지원금
+            <input id="adminSupportAmount" type="number" min="0" step="1000" />
+          </label>
+          <label>지원금 사용 기준
+            <input id="adminSupportLimit" type="number" min="0" step="1000" />
+          </label>
+
+          <label>수수료율
+            <input id="adminFeeRate" type="number" min="0" step="0.0001" />
+          </label>
+          <label>변동성
+            <input id="adminVolatility" type="number" min="0.2" step="0.1" />
+          </label>
+          <label>뉴스 빈도
+            <input id="adminNewsFreq" type="number" min="0.2" step="0.1" />
+          </label>
+
+          <label>상한율
+            <input id="adminUpperLimitRate" type="number" min="0.05" step="0.01" />
+          </label>
+          <label>하한율
+            <input id="adminLowerLimitRate" type="number" min="0.05" step="0.01" />
+          </label>
+          <label class="admin-check">
+            <span>상하한 활성화</span>
+            <input id="adminDailyLimitEnabled" type="checkbox" />
+          </label>
+
+          <label class="admin-check">
+            <span>100x~300x 사용</span>
+            <input id="adminHighSpeedEnabled" type="checkbox" />
+          </label>
+        </div>
+
+        <div class="admin-stock-box">
+          <label>종목 선택
+            <select id="adminStockSelect"></select>
+          </label>
+          <label>현재가 수정
+            <input id="adminStockPrice" type="number" min="1" step="1" />
+          </label>
+          <label class="admin-check">
+            <span>가격 고정</span>
+            <input id="adminStockFixed" type="checkbox" />
+          </label>
+        </div>
+
+        <div class="admin-actions">
+          <button id="applyAdminStockPriceBtn" class="top-action-btn control-btn" type="button">가격 반영</button>
+          <button id="saveAdminSettingsBtn" class="top-action-btn control-btn" type="button">설정 저장</button>
+          <button id="forceBaselineResetBtn" class="top-action-btn control-btn" type="button">수익률 기준 초기화</button>
+          <button id="adminCancelAllAutoSellBtn" class="top-action-btn control-btn" type="button">예약판매 전체 취소</button>
+          <button id="adminCancelAllAutoBuyBtn" class="top-action-btn control-btn" type="button">예약구매 전체 취소</button>
+          <button id="adminResetAllBtn" class="top-action-btn danger-btn" type="button">전체 데이터 초기화</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
