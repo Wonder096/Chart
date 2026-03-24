@@ -43,7 +43,7 @@
           <button class="top-action-btn control-btn" id="loadSlotBtn" type="button">불러오기</button>
           <button class="top-action-btn control-btn" id="adminEntryBtn" type="button">관리자</button>
           <button class="icon-btn alert-btn" id="alertBellBtn" type="button" title="알림">
-            <span class="alert-bell">🔔</span>
+            <span>🔔</span>
             <span class="badge" id="alertBadge">0</span>
           </button>
         </div>
@@ -138,17 +138,10 @@
 
             <div class="chart-card">
               <div class="chart-wrap">
-                <canvas id="priceChart" width="1280" height="760"></canvas>
+                <canvas id="priceChart"></canvas>
                 <div class="chart-tooltip hidden" id="chartTooltip"></div>
               </div>
-              <div class="chart-xhint" id="chartXAxisHint">
-                <span>월</span>
-                <span>일</span>
-                <span>월</span>
-                <span>일</span>
-                <span>월</span>
-                <span>일</span>
-              </div>
+              <div class="chart-xhint" id="chartXAxisHint"></div>
             </div>
 
             <div class="chart-under-grid">
@@ -175,21 +168,21 @@
                   <h3>투자자 동향</h3>
                 </div>
 
-                <div class="investor-bars" id="investorBars">
+                <div class="investor-bars">
                   <div class="investor-bar-row">
                     <span class="investor-name">개인</span>
-                    <span class="investor-value positive" id="investorPersonalValue">+0</span>
-                    <div class="investor-track"><div class="investor-fill positive" id="investorPersonalBar"></div></div>
+                    <span class="investor-value" id="investorPersonalValue">+0</span>
+                    <div class="investor-track"><div class="investor-fill" id="investorPersonalBar"></div></div>
                   </div>
                   <div class="investor-bar-row">
                     <span class="investor-name">외국인</span>
-                    <span class="investor-value negative" id="investorForeignValue">-0</span>
-                    <div class="investor-track"><div class="investor-fill negative" id="investorForeignBar"></div></div>
+                    <span class="investor-value" id="investorForeignValue">+0</span>
+                    <div class="investor-track"><div class="investor-fill" id="investorForeignBar"></div></div>
                   </div>
                   <div class="investor-bar-row">
                     <span class="investor-name">기관</span>
-                    <span class="investor-value neutral" id="investorInstitutionValue">0</span>
-                    <div class="investor-track"><div class="investor-fill neutral" id="investorInstitutionBar"></div></div>
+                    <span class="investor-value" id="investorInstitutionValue">+0</span>
+                    <div class="investor-track"><div class="investor-fill" id="investorInstitutionBar"></div></div>
                   </div>
                 </div>
 
@@ -376,6 +369,7 @@
                 <span>시가 <b id="obOpenPrice">0원</b></span>
                 <span>현재가 <b id="obCurrentPrice">0원</b></span>
               </div>
+
               <div class="order-strength">
                 <div class="order-strength-labels">
                   <span>체결강도</span>
@@ -388,6 +382,28 @@
                 <div class="order-strength-meta">
                   <span>판매대기 <b id="orderSellMeta">0</b></span>
                   <span>구매대기 <b id="orderBuyMeta">0</b></span>
+                </div>
+              </div>
+
+              <div class="holding-under-book">
+                <div class="holding-under-title">보유 주식</div>
+                <div class="holding-under-grid">
+                  <div class="holding-under-card">
+                    <span>종목</span>
+                    <b id="bookHoldingName">-</b>
+                  </div>
+                  <div class="holding-under-card">
+                    <span>보유 수량</span>
+                    <b id="bookHoldingQty">0주</b>
+                  </div>
+                  <div class="holding-under-card">
+                    <span>평단</span>
+                    <b id="bookHoldingAvg">0원</b>
+                  </div>
+                  <div class="holding-under-card">
+                    <span>종목 손익률</span>
+                    <b id="bookHoldingRate">0.00%</b>
+                  </div>
                 </div>
               </div>
             </div>
