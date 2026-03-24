@@ -39,13 +39,8 @@ body{
 button,input,select,textarea{font:inherit}
 button{transition:.16s ease}
 button:hover{transform:translateY(-1px)}
-button:disabled{
-  transform:none;
-  opacity:.48;
-  cursor:not-allowed;
-}
+button:disabled{transform:none;opacity:.48;cursor:not-allowed}
 input,select,textarea{outline:none}
-
 .hidden{display:none !important}
 
 .app-shell{
@@ -135,10 +130,17 @@ input,select,textarea{outline:none}
 
 .summary-value{
   font-size:15px;
-  line-height:1.25;
+  line-height:1.35;
   font-weight:900;
-  white-space:nowrap;
   letter-spacing:-.02em;
+  white-space:nowrap;
+}
+
+.summary-value .subline{
+  display:block;
+  margin-top:4px;
+  font-size:12px;
+  font-weight:800;
 }
 
 .top-action-btn,
@@ -166,12 +168,10 @@ input,select,textarea{outline:none}
 }
 
 .control-btn{background:rgba(255,255,255,.06)}
-
 .danger-btn{
   background:rgba(255,95,130,.12);
   color:#ffb3c3;
 }
-
 .reset-btn{
   background:rgba(255,180,77,.12);
   color:#ffd696;
@@ -220,16 +220,9 @@ input,select,textarea{outline:none}
 
 .left-zone,.right-zone{min-width:0}
 .right-zone{position:relative}
+.panel{border-radius:28px;min-width:0}
 
-.panel{
-  border-radius:28px;
-  min-width:0;
-}
-
-.hero-panel{
-  padding:18px 22px;
-}
-
+.hero-panel{padding:18px 22px}
 .hero-grid{
   display:grid;
   grid-template-columns:1.15fr .92fr .86fr;
@@ -257,11 +250,7 @@ input,select,textarea{outline:none}
   flex-shrink:0;
 }
 
-.stock-meta{
-  min-width:0;
-  width:100%;
-}
-
+.stock-meta{min-width:0;width:100%}
 .stock-name-row{
   display:flex;
   align-items:center;
@@ -289,12 +278,7 @@ input,select,textarea{outline:none}
   font-size:17px;
   font-weight:900;
   cursor:pointer;
-  transition:.18s ease;
   flex-shrink:0;
-}
-
-.favorite-toggle:hover{
-  background:rgba(255,255,255,.1);
 }
 
 .stock-code{
@@ -304,7 +288,6 @@ input,select,textarea{outline:none}
 }
 
 .hero-select-row{margin-top:14px}
-
 .hero-select-row label,
 .form-group label{
   display:block;
@@ -328,13 +311,15 @@ input,select,textarea{outline:none}
 
 .hero-select-row select:focus,
 .filter-row input:focus,
-.form-group input:focus{
+.form-group input:focus,
+.admin-grid input:focus,
+.admin-grid select:focus,
+.admin-login-row input:focus{
   border-color:rgba(94,149,255,.55);
   box-shadow:0 0 0 4px rgba(76,124,255,.08);
 }
 
 .hero-select-row select option,
-#heroStockSelect option,
 select option{
   background:#0c1830;
   color:#f5f8ff;
@@ -372,7 +357,6 @@ select option{
   font-size:13px;
   color:#c7d8fb;
 }
-
 .hero-kpis b{color:#fff}
 
 .hero-side{
@@ -440,13 +424,11 @@ select option{
   border:1px solid var(--line);
   overflow:hidden;
 }
-
 #moodFill{
   width:50%;
   height:100%;
   background:linear-gradient(90deg,var(--red),var(--yellow),var(--green));
 }
-
 .mood-text{
   margin-top:10px;
   color:#dbe7ff;
@@ -487,7 +469,6 @@ select option{
   gap:12px;
   margin-bottom:14px;
 }
-
 .panel-head h2{
   margin:0;
   font-size:17px;
@@ -516,7 +497,6 @@ select option{
   font-size:12px;
   font-weight:900;
 }
-
 .ma5{color:#ff6f95}
 .ma20{color:#ffc943}
 .ma60{color:#8a74ff}
@@ -532,13 +512,11 @@ select option{
     linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01)),
     radial-gradient(circle at top, rgba(69,122,255,.11), transparent 34%);
 }
-
 #priceChart{
   width:100%;
   height:auto;
   display:block;
 }
-
 .chart-tooltip{
   position:absolute;
   min-width:190px;
@@ -559,7 +537,6 @@ select option{
   padding-top:14px;
   border-top:1px solid var(--line);
 }
-
 .selected-news-head{
   display:flex;
   align-items:center;
@@ -567,14 +544,12 @@ select option{
   gap:12px;
   margin-bottom:12px;
 }
-
 .selected-news-head h3{
   margin:0;
   font-size:16px;
   font-weight:900;
   letter-spacing:-.02em;
 }
-
 .selected-news-feed{
   display:flex;
   flex-direction:column;
@@ -591,7 +566,6 @@ select option{
   font-size:12px;
   color:var(--muted);
 }
-
 .order-mini-head b{color:#fff}
 
 .order-summary-grid{
@@ -609,7 +583,6 @@ select option{
   border:1px solid var(--line);
   background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.02));
 }
-
 .metric-card span,
 .portfolio-card span{
   display:block;
@@ -617,10 +590,8 @@ select option{
   font-size:12px;
   margin-bottom:7px;
 }
-
 .metric-card b,
-.portfolio-card b,
-.portfolio-card strong{
+.portfolio-card b{
   font-size:17px;
   font-weight:900;
   letter-spacing:-.03em;
@@ -639,7 +610,6 @@ select option{
   box-shadow:0 12px 26px rgba(57,124,255,.24);
   color:#fff !important;
 }
-
 #sellModeBtn.active{
   background:linear-gradient(135deg,#ff6f93,#ff8da9) !important;
   border-color:transparent !important;
@@ -666,13 +636,11 @@ select option{
   background:linear-gradient(135deg, rgba(36,92,201,.24), rgba(82,171,255,.10));
   margin-bottom:12px;
 }
-
 .readonly-price-box span{
   color:#bfd6ff;
   font-size:12px;
   font-weight:800;
 }
-
 .readonly-price-box b{
   font-size:20px;
   font-weight:900;
@@ -700,7 +668,6 @@ select option{
   gap:9px;
   margin:14px 0;
 }
-
 .quick-row button{
   min-height:40px;
   border:none;
@@ -713,10 +680,6 @@ select option{
   cursor:pointer;
 }
 
-.quick-row button:hover{
-  border-color:rgba(111,165,255,.32);
-}
-
 .estimate-box{
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -727,14 +690,12 @@ select option{
   background:rgba(255,255,255,.035);
   border:1px solid var(--line);
 }
-
 .estimate-box span{
   display:block;
   font-size:12px;
   color:var(--muted);
   margin-bottom:6px;
 }
-
 .estimate-box b{
   font-size:18px;
   font-weight:900;
@@ -753,27 +714,19 @@ select option{
   color:#fff;
 }
 
-.primary-order-btn.buy{
-  background:linear-gradient(135deg,#397cff,#55b8ff) !important;
-  box-shadow:0 14px 28px rgba(57,124,255,.24);
-}
-
-.primary-order-btn.sell{
-  background:linear-gradient(135deg,#ff6f93,#ff8da9) !important;
-  box-shadow:0 14px 28px rgba(255,111,147,.22);
-}
+.primary-order-btn.buy{background:linear-gradient(135deg,#397cff,#55b8ff)}
+.primary-order-btn.sell{background:linear-gradient(135deg,#ff6f93,#ff8da9)}
+.auto-sell-add-btn{background:linear-gradient(135deg,#2f71ff,#58bfff)}
 
 .auto-sell-head{
   margin-bottom:14px;
 }
-
 .auto-sell-head h3{
   margin:0;
   font-size:15px;
   font-weight:900;
   letter-spacing:-.02em;
 }
-
 .auto-sell-head p{
   margin:6px 0 0;
   color:#97aed8;
@@ -785,7 +738,6 @@ select option{
   display:flex;
   align-items:flex-end;
 }
-
 .checkbox-label{
   display:flex;
   align-items:center;
@@ -800,24 +752,19 @@ select option{
   font-size:14px;
   font-weight:800;
 }
-
 .checkbox-label input{
   width:16px;
   height:16px;
   accent-color:#4b92ff;
 }
 
-.auto-sell-list-wrap{
-  margin-top:14px;
-}
-
+.auto-sell-list-wrap{margin-top:14px}
 .auto-sell-list-head{
   font-size:12px;
   color:#9fb3de;
   margin-bottom:8px;
   font-weight:800;
 }
-
 .auto-sell-list{
   display:flex;
   flex-direction:column;
@@ -826,7 +773,6 @@ select option{
   overflow:auto;
   padding-right:4px;
 }
-
 .auto-sell-item{
   padding:12px;
   border-radius:16px;
@@ -837,7 +783,6 @@ select option{
   justify-content:space-between;
   gap:12px;
 }
-
 .auto-sell-item-main{
   display:grid;
   gap:5px;
@@ -861,21 +806,16 @@ select option{
   border:1px solid var(--line);
   white-space:nowrap;
 }
-
 .live-chip{
   color:var(--green);
   background:rgba(78,225,143,.08);
 }
-
 .small-chip{
   color:var(--muted);
   background:rgba(255,255,255,.04);
 }
 
-.orderbook-panel{
-  overflow:hidden;
-}
-
+.orderbook-panel{overflow:hidden}
 .orderbook-head{
   display:grid !important;
   grid-template-columns:1fr 124px 1fr !important;
@@ -885,7 +825,6 @@ select option{
   font-size:12px !important;
   border-bottom:1px solid rgba(255,255,255,.08) !important;
 }
-
 .orderbook-head span:nth-child(1){text-align:left}
 .orderbook-head span:nth-child(2){text-align:center}
 .orderbook-head span:nth-child(3){text-align:right}
@@ -899,7 +838,6 @@ select option{
   overflow:auto !important;
   padding-right:4px !important;
 }
-
 .orderbook-row{
   display:grid !important;
   grid-template-columns:1fr 124px 1fr !important;
@@ -924,21 +862,18 @@ select option{
   font-size:13px !important;
   letter-spacing:-.02em !important;
 }
-
 .ask-qty{
   justify-self:start !important;
   min-width:74px !important;
   color:#ffbfd0 !important;
   background:linear-gradient(135deg, rgba(255,95,130,.22), rgba(255,95,130,.07)) !important;
 }
-
 .bid-qty{
   justify-self:end !important;
   min-width:74px !important;
   color:#c5ddff !important;
   background:linear-gradient(135deg, rgba(79,149,255,.22), rgba(79,149,255,.07)) !important;
 }
-
 .mid-price{
   min-height:38px !important;
   display:flex !important;
@@ -952,7 +887,6 @@ select option{
   text-align:center !important;
   letter-spacing:-.03em !important;
 }
-
 .mid-up{color:#ff93ae !important}
 .mid-down{color:#6ac7ff !important}
 
@@ -981,13 +915,11 @@ select option{
   border:1px solid rgba(255,255,255,.06);
   background:linear-gradient(180deg, rgba(255,255,255,.032), rgba(255,255,255,.018));
 }
-
 .news-card:hover,
 .history-card:hover{
   border-color:rgba(104,160,255,.16);
   background:linear-gradient(180deg, rgba(39,78,156,.16), rgba(255,255,255,.02));
 }
-
 .news-card-top,
 .history-card-top{
   display:flex;
@@ -996,64 +928,53 @@ select option{
   gap:10px;
   margin-bottom:8px;
 }
-
 .news-type.good{
   color:#9cf0b8;
   background:rgba(78,225,143,.12);
   border-color:rgba(78,225,143,.18);
 }
-
-.news-type.bad,
-.news-type.warn{
+.news-type.bad{
   color:#ffb6c7;
   background:rgba(255,95,130,.12);
   border-color:rgba(255,95,130,.18);
 }
-
 .news-type.event{
   color:#ffd78c;
   background:rgba(242,200,106,.12);
   border-color:rgba(242,200,106,.18);
 }
-
 .news-type.breaking{
   color:#cfd6ff;
   background:rgba(130,122,255,.13);
   border-color:rgba(130,122,255,.18);
 }
-
 .history-type.buy{
   color:#9fd9ff;
   background:rgba(79,149,255,.12);
   border-color:rgba(79,149,255,.18);
 }
-
 .history-type.sell{
   color:#ffb9c8;
   background:rgba(255,95,130,.12);
   border-color:rgba(255,95,130,.18);
 }
-
 .history-type.alert{
   color:#ffe3a8;
   background:rgba(242,200,106,.12);
   border-color:rgba(242,200,106,.18);
 }
-
 .news-time,
 .history-time{
   color:#9cb0d5;
   font-size:11px;
   font-weight:700;
 }
-
 .news-title,
 .history-main{
   font-size:14px;
   font-weight:900;
   letter-spacing:-.02em;
 }
-
 .news-sub,
 .history-sub{
   color:#d8e5ff;
@@ -1064,14 +985,12 @@ select option{
 .portfolio-big{
   padding:6px 0 14px;
 }
-
 .portfolio-total{
   font-size:42px;
   line-height:1.05;
   letter-spacing:-.05em;
   font-weight:900;
 }
-
 .portfolio-pl{
   margin-top:8px;
   font-size:18px;
@@ -1085,29 +1004,22 @@ select option{
   gap:11px;
 }
 
+.portfolio-actions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:12px;
+}
+
 .watchlist-top{
   flex-direction:column;
   align-items:stretch;
 }
-
 .sort-row{width:100%}
 .sort-row .sort-btn{flex:1}
 
-.filter-row{
-  margin-bottom:12px;
-}
-
-.filter-row input{
-  min-height:42px !important;
-  border-radius:15px !important;
-  background:linear-gradient(180deg, rgba(10,20,40,.98), rgba(6,14,28,.98)) !important;
-  border:1px solid rgba(255,255,255,.08) !important;
-  color:#eef5ff !important;
-}
-
-.filter-row input::placeholder{
-  color:#8fa5cf !important;
-}
+.filter-row{margin-bottom:12px}
+.filter-row input::placeholder{color:#8fa5cf !important}
 
 .section-subtitle{
   font-size:12px;
@@ -1115,18 +1027,15 @@ select option{
   font-weight:800;
   margin-bottom:10px;
 }
-
 .section-subtitle.with-badge{
   display:flex;
   align-items:center;
 }
-
 .watchlist-block{
   display:flex;
   flex-direction:column;
   gap:8px;
 }
-
 .empty-state-box{
   padding:14px;
   border-radius:14px;
@@ -1134,7 +1043,6 @@ select option{
   border:1px dashed rgba(255,255,255,.08);
   background:rgba(255,255,255,.02);
 }
-
 .favorite-stock-chip{
   width:100%;
   min-height:36px;
@@ -1156,7 +1064,6 @@ select option{
   overflow:auto;
   padding-right:4px;
 }
-
 .watch-item{
   width:100%;
   text-align:left;
@@ -1173,18 +1080,15 @@ select option{
   justify-content:space-between;
   gap:12px;
 }
-
 .watch-item:hover{
   border-color:rgba(100,155,255,.2);
   background:linear-gradient(180deg, rgba(31,69,144,.16), rgba(255,255,255,.02));
 }
-
 .watch-item.active{
   border-color:rgba(97,154,255,.34);
   background:linear-gradient(180deg, rgba(79,149,255,.13), rgba(255,255,255,.03));
   box-shadow:inset 0 0 0 1px rgba(97,154,255,.12);
 }
-
 .watch-logo{
   width:40px;
   height:40px;
@@ -1197,14 +1101,12 @@ select option{
   color:#fff;
   flex-shrink:0;
 }
-
 .watch-left{
   display:flex;
   align-items:center;
   gap:12px;
   min-width:0;
 }
-
 .watch-name{
   font-size:15px;
   font-weight:900;
@@ -1214,13 +1116,11 @@ select option{
   overflow:hidden;
   text-overflow:ellipsis;
 }
-
 .watch-theme{
   margin-top:3px;
   color:#8da6d4;
   font-size:11px;
 }
-
 .watch-right{
   display:flex;
   flex-direction:column;
@@ -1230,18 +1130,15 @@ select option{
   text-align:right;
   flex-shrink:0;
 }
-
 .watch-price{
   font-size:21px;
   font-weight:900;
   letter-spacing:-.03em;
 }
-
 .watch-rate{
   font-size:13px;
   font-weight:900;
 }
-
 .watch-mini{
   font-size:11px;
   color:#8ea5cc;
@@ -1249,22 +1146,6 @@ select option{
 
 .positive{color:#ff92ad}
 .negative{color:#67c2ff}
-
-#portfolioExtraBox{
-  margin-top:12px;
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:11px;
-}
-
-#portfolioExtraBox .portfolio-card{
-  min-height:74px;
-}
-
-#portfolioExtraBox .ghost-btn{
-  min-height:48px;
-  border-radius:16px;
-}
 
 #adminOverlay{
   position:fixed;
@@ -1276,186 +1157,159 @@ select option{
   justify-content:center;
   z-index:9999;
 }
-
 #adminOverlay.hidden{display:none}
-
 #adminModal{
-  width:min(1180px, calc(100vw - 26px)) !important;
-  max-height:calc(100vh - 22px) !important;
+  width:min(1180px, calc(100vw - 26px));
+  max-height:calc(100vh - 22px);
   overflow:auto;
-  padding:22px !important;
-  border-radius:26px !important;
-  background:linear-gradient(180deg, rgba(13,24,48,.985), rgba(8,17,34,.985)) !important;
+  padding:22px;
+  border-radius:26px;
+  background:linear-gradient(180deg, rgba(13,24,48,.985), rgba(8,17,34,.985));
   border:1px solid rgba(255,255,255,.1);
   box-shadow:0 24px 60px rgba(0,0,0,.45);
   color:#f5f8ff;
 }
-
+.admin-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:16px;
+  margin-bottom:16px;
+}
+.admin-title{
+  font-size:22px;
+  font-weight:900;
+}
+.admin-sub{
+  margin-top:6px;
+  color:#9cb1d9;
+  font-size:13px;
+}
 #adminLoginBox,
-#adminPanelBox,
-.admin-block{
-  border-radius:22px !important;
-  padding:18px !important;
-  background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.018)) !important;
-  border:1px solid rgba(255,255,255,.08) !important;
+#adminPanelBox{
+  border-radius:22px;
+  padding:18px;
+  background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.018));
+  border:1px solid rgba(255,255,255,.08);
 }
-
-#adminPanelBox > div{
-  gap:12px !important;
+.admin-login-row{
+  display:grid;
+  grid-template-columns:1fr 140px;
+  gap:12px;
 }
-
-#adminPanelBox label{
-  font-size:13px !important;
-  color:#9cb1d9 !important;
-  font-weight:700 !important;
-}
-
-#adminPanelBox input,
-#adminPanelBox select,
-#adminLoginBox input{
-  min-height:46px !important;
-  border-radius:16px !important;
-  background:#081224 !important;
-  border:1px solid rgba(255,255,255,.08) !important;
-  color:#f5f8ff !important;
-  padding:12px 14px !important;
-}
-
-#adminPanelBox input:focus,
-#adminPanelBox select:focus,
-#adminLoginBox input:focus{
-  border-color:rgba(94,149,255,.55) !important;
-  box-shadow:0 0 0 4px rgba(76,124,255,.08) !important;
-}
-
-#adminPanelBox button,
-#adminLoginBox button{
-  min-height:46px !important;
-  border-radius:16px !important;
-  font-size:15px !important;
-  font-weight:900 !important;
-}
-
-#adminPanelBox .checkbox-label{
-  min-height:46px !important;
-  border-radius:16px !important;
-  background:rgba(255,255,255,.04) !important;
-}
-
-#adminResetAllBtn{
-  background:linear-gradient(135deg, rgba(255,95,130,.22), rgba(255,95,130,.08)) !important;
-  color:#ffc2cf !important;
-  border:1px solid rgba(255,95,130,.18) !important;
-}
-
-#adminStockSelect option,
-#adminPanelBox select option{
-  background:#0c1830;
+.admin-login-row input{
+  min-height:46px;
+  border-radius:16px;
+  background:#081224;
+  border:1px solid rgba(255,255,255,.08);
   color:#f5f8ff;
+  padding:12px 14px;
+}
+.admin-grid{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:12px;
+}
+.admin-grid label,
+.admin-stock-box label{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  font-size:13px;
+  color:#9cb1d9;
+  font-weight:700;
+}
+.admin-grid input,
+.admin-grid select,
+.admin-stock-box input,
+.admin-stock-box select{
+  min-height:46px;
+  border-radius:16px;
+  background:#081224;
+  border:1px solid rgba(255,255,255,.08);
+  color:#f5f8ff;
+  padding:12px 14px;
+}
+.admin-check{
+  justify-content:center;
+  align-items:flex-start;
+  padding:10px 12px;
+  border-radius:16px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+}
+.admin-check input{
+  width:18px;
+  height:18px;
+  accent-color:#4b92ff;
+  min-height:auto;
+  padding:0;
+}
+.admin-stock-box{
+  display:grid;
+  grid-template-columns:1.2fr 1fr .8fr;
+  gap:12px;
+  margin-top:14px;
+}
+.admin-actions{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:12px;
+  margin-top:14px;
 }
 
-::-webkit-scrollbar{
-  width:10px;
-  height:10px;
-}
+::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-thumb{
   background:rgba(255,255,255,.12);
   border-radius:999px;
 }
-::-webkit-scrollbar-track{
-  background:transparent;
-}
+::-webkit-scrollbar-track{background:transparent}
 
 @media (max-width:1750px){
-  .main-layout{
-    grid-template-columns:minmax(0,1fr) 390px;
-  }
-  .trade-layout{
-    grid-template-columns:minmax(0,1.45fr) minmax(480px,.95fr);
-  }
+  .main-layout{grid-template-columns:minmax(0,1fr) 390px}
+  .trade-layout{grid-template-columns:minmax(0,1.45fr) minmax(480px,.95fr)}
 }
-
 @media (max-width:1540px){
-  .hero-grid{
-    grid-template-columns:1fr;
-  }
-  .trade-layout{
-    grid-template-columns:1fr;
-  }
-  .right-trade-stack{
-    grid-template-columns:minmax(0,1fr) minmax(260px,320px);
-  }
+  .hero-grid{grid-template-columns:1fr}
+  .trade-layout{grid-template-columns:1fr}
+  .right-trade-stack{grid-template-columns:minmax(0,1fr) minmax(260px,320px)}
 }
-
 @media (max-width:1380px){
-  .main-layout{
-    grid-template-columns:1fr;
-  }
-  .right-zone{
-    order:2;
-  }
-  .watchlist{
-    max-height:620px;
-  }
+  .main-layout{grid-template-columns:1fr}
+  .right-zone{order:2}
+  .watchlist{max-height:620px}
 }
-
+@media (max-width:1100px){
+  .admin-grid{grid-template-columns:1fr 1fr}
+  .admin-stock-box,
+  .admin-actions{grid-template-columns:1fr 1fr}
+}
 @media (max-width:960px){
-  .topbar{
-    flex-direction:column;
-    align-items:stretch;
-  }
-  .topbar-right{
-    align-items:stretch;
-  }
+  .topbar{flex-direction:column;align-items:stretch}
+  .topbar-right{align-items:stretch}
   .top-summary-row,
-  .header-actions{
-    justify-content:flex-start;
-  }
-  .right-trade-stack{
-    grid-template-columns:1fr;
-  }
-  .bottom-grid{
-    grid-template-columns:1fr;
-  }
-  .main-price{
-    font-size:44px;
-  }
-  .portfolio-total{
-    font-size:34px;
-  }
-  .chart-wrap{
-    min-height:520px;
-  }
+  .header-actions{justify-content:flex-start}
+  .right-trade-stack{grid-template-columns:1fr}
+  .bottom-grid{grid-template-columns:1fr}
+  .main-price{font-size:44px}
+  .portfolio-total{font-size:34px}
+  .chart-wrap{min-height:520px}
 }
-
 @media (max-width:680px){
-  .app-shell{
-    width:min(100vw - 10px, 100%);
-  }
-  .summary-card{
-    min-width:unset;
-    width:100%;
-  }
+  .app-shell{width:min(100vw - 10px, 100%)}
+  .summary-card{min-width:unset;width:100%}
   .order-summary-grid,
   .portfolio-grid,
   .form-grid,
   .auto-sell-grid,
-  #portfolioExtraBox{
-    grid-template-columns:1fr;
-  }
-  .quick-row{
-    grid-template-columns:repeat(2,1fr);
-  }
-  .orderbook-head{
-    grid-template-columns:1fr 98px 1fr !important;
-  }
-  .orderbook-row{
-    grid-template-columns:1fr 98px 1fr !important;
-  }
-  .main-price{
-    font-size:38px;
-  }
-  .stock-name-row h1{
-    font-size:25px;
-  }
+  .portfolio-actions,
+  .admin-grid,
+  .admin-stock-box,
+  .admin-actions{grid-template-columns:1fr}
+  .quick-row{grid-template-columns:repeat(2,1fr)}
+  .orderbook-head{grid-template-columns:1fr 98px 1fr !important}
+  .orderbook-row{grid-template-columns:1fr 98px 1fr !important}
+  .main-price{font-size:38px}
+  .stock-name-row h1{font-size:25px}
+  .admin-login-row{grid-template-columns:1fr}
 }
