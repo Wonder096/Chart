@@ -3,18 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>K-모의증권 Pro</title>
+  <title>주식 모의증권</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-box">
-        <div class="brand-mark">
-          <div class="brand-mark-core">₩</div>
-        </div>
+        <div class="brand-icon">₩</div>
         <div class="brand-copy">
-          <div class="brand-title">K-모의증권 Pro</div>
+          <div class="brand-title">주식 모의증권</div>
           <div class="brand-sub">Toss Style Dark Trading Interface</div>
         </div>
       </div>
@@ -45,7 +43,7 @@
           <button class="top-action-btn control-btn" id="loadSlotBtn" type="button">불러오기</button>
           <button class="top-action-btn control-btn" id="adminEntryBtn" type="button">관리자</button>
           <button class="icon-btn alert-btn" id="alertBellBtn" type="button" title="알림">
-            <span class="alert-icon">🔔</span>
+            <span class="alert-bell">🔔</span>
             <span class="badge" id="alertBadge">0</span>
           </button>
         </div>
@@ -53,7 +51,7 @@
     </header>
 
     <main class="main-layout">
-      <section class="left-zone">
+      <section class="main-board">
         <section class="panel hero-panel">
           <div class="hero-grid">
             <div class="hero-stock">
@@ -67,12 +65,12 @@
                     <h1 id="selectedName">한강테크</h1>
                     <div class="stock-code" id="selectedCode">KQ001 · AI 반도체</div>
                   </div>
-                  <button class="favorite-toggle" id="favoriteToggleBtn" type="button" title="즐겨찾기">☆</button>
+                  <button class="favorite-toggle" id="favoriteToggleBtn" type="button" title="즐겨찾기">★</button>
                 </div>
 
                 <div class="hero-select-row">
                   <label for="heroStockSelect">종목 선택</label>
-                  <div class="hero-select-box">
+                  <div class="hero-select-wrap">
                     <select id="heroStockSelect"></select>
                   </div>
                 </div>
@@ -80,25 +78,23 @@
             </div>
 
             <div class="hero-price">
-              <div class="hero-price-top">
-                <div class="main-price" id="selectedPrice">0원</div>
-                <div class="main-change" id="selectedChange">+0원 (+0.00%)</div>
-              </div>
+              <div class="main-price" id="selectedPrice">0원</div>
+              <div class="main-change" id="selectedChange">+0원 (+0.00%)</div>
 
               <div class="hero-kpis">
-                <div class="hero-kpi-item">
+                <div class="hero-kpi">
                   <span>시가</span>
                   <b id="dayOpen">0원</b>
                 </div>
-                <div class="hero-kpi-item">
+                <div class="hero-kpi">
                   <span>고가</span>
                   <b id="dayHigh">0원</b>
                 </div>
-                <div class="hero-kpi-item">
+                <div class="hero-kpi">
                   <span>저가</span>
                   <b id="dayLow">0원</b>
                 </div>
-                <div class="hero-kpi-item">
+                <div class="hero-kpi">
                   <span>거래량</span>
                   <b id="dayVolume">0</b>
                 </div>
@@ -122,21 +118,21 @@
           </div>
         </section>
 
-        <section class="trade-layout">
+        <section class="toss-main-grid">
           <section class="panel chart-panel">
-            <div class="panel-head chart-panel-head">
-              <div class="panel-left-head">
-                <div class="section-title-box">
-                  <h2>실시간 차트</h2>
-                  <p>선택 종목 흐름과 이동평균선을 한눈에 볼 수 있어요</p>
-                </div>
-                <div class="chart-tabs" id="chartTabs"></div>
+            <div class="panel-head chart-head">
+              <div class="panel-title-box">
+                <h2>실시간 차트</h2>
+                <p>선택 종목 흐름과 이동평균선을 한눈에 볼 수 있어요</p>
               </div>
 
-              <div class="ma-legend">
-                <span class="ma5">MA5</span>
-                <span class="ma20">MA20</span>
-                <span class="ma60">MA60</span>
+              <div class="chart-head-right">
+                <div class="chart-tabs" id="chartTabs"></div>
+                <div class="ma-legend">
+                  <span class="ma5">MA5</span>
+                  <span class="ma20">MA20</span>
+                  <span class="ma60">MA60</span>
+                </div>
               </div>
             </div>
 
@@ -145,13 +141,72 @@
                 <canvas id="priceChart" width="1280" height="760"></canvas>
                 <div class="chart-tooltip hidden" id="chartTooltip"></div>
               </div>
+              <div class="chart-xhint" id="chartXAxisHint">
+                <span>월</span>
+                <span>일</span>
+                <span>월</span>
+                <span>일</span>
+                <span>월</span>
+                <span>일</span>
+              </div>
+            </div>
+
+            <div class="chart-under-grid">
+              <section class="under-card quote-card">
+                <div class="under-card-head">
+                  <h3>시세</h3>
+                  <div class="under-switch-row">
+                    <button class="mini-switch active" type="button" data-quote-mode="real">실시간</button>
+                    <button class="mini-switch" type="button" data-quote-mode="daily">일별</button>
+                  </div>
+                </div>
+
+                <div class="quote-table-head">
+                  <span>체결가</span>
+                  <span>체결량(주)</span>
+                  <span>등락률</span>
+                  <span>거래량</span>
+                </div>
+                <div class="quote-table-body" id="quoteTableBody"></div>
+              </section>
+
+              <section class="under-card investor-card">
+                <div class="under-card-head">
+                  <h3>투자자 동향</h3>
+                </div>
+
+                <div class="investor-bars" id="investorBars">
+                  <div class="investor-bar-row">
+                    <span class="investor-name">개인</span>
+                    <span class="investor-value positive" id="investorPersonalValue">+0</span>
+                    <div class="investor-track"><div class="investor-fill positive" id="investorPersonalBar"></div></div>
+                  </div>
+                  <div class="investor-bar-row">
+                    <span class="investor-name">외국인</span>
+                    <span class="investor-value negative" id="investorForeignValue">-0</span>
+                    <div class="investor-track"><div class="investor-fill negative" id="investorForeignBar"></div></div>
+                  </div>
+                  <div class="investor-bar-row">
+                    <span class="investor-name">기관</span>
+                    <span class="investor-value neutral" id="investorInstitutionValue">0</span>
+                    <div class="investor-track"><div class="investor-fill neutral" id="investorInstitutionBar"></div></div>
+                  </div>
+                </div>
+
+                <div class="investor-table-head">
+                  <span>일자</span>
+                  <span>개인</span>
+                  <span>외국인</span>
+                  <span>기관</span>
+                </div>
+                <div class="investor-table-body" id="investorTableBody"></div>
+              </section>
             </div>
 
             <div class="selected-news-block">
               <div class="selected-news-head">
-                <div class="section-title-box">
+                <div class="panel-title-box compact">
                   <h3><span id="selectedNewsTitleName">한강테크</span> 뉴스 · 이벤트</h3>
-                  <p>현재 선택한 종목 중심으로 보여줘요</p>
                 </div>
                 <span class="small-chip" id="selectedNewsCount">0건</span>
               </div>
@@ -159,179 +214,276 @@
             </div>
           </section>
 
-          <div class="right-trade-stack">
-            <section class="panel order-panel">
+          <section class="panel order-panel">
+            <div class="panel-head order-panel-head">
+              <div class="panel-title-box">
+                <h2>주문 패널</h2>
+                <p>일반주문 · 자동매매 · 빠른 비율 주문</p>
+              </div>
+              <div class="order-mini-head">
+                <span>보유 <b id="holdingQtyInline">0주</b></span>
+                <span>평단 <b id="avgPriceInline">0원</b></span>
+              </div>
+            </div>
+
+            <div class="order-top-mode">
+              <button class="trade-mode active" id="buyModeBtn" type="button">구매</button>
+              <button class="trade-mode" id="sellModeBtn" type="button">판매</button>
+            </div>
+
+            <div class="order-summary-grid">
+              <div class="metric-card">
+                <span>주문 가능 현금</span>
+                <b id="availableCash">0원</b>
+              </div>
+              <div class="metric-card">
+                <span>최대 매수 가능</span>
+                <b id="maxBuyQty">0주</b>
+              </div>
+              <div class="metric-card">
+                <span>보유 수량</span>
+                <b id="currentHoldingQty">0주</b>
+              </div>
+              <div class="metric-card">
+                <span>평균 단가</span>
+                <b id="currentAvgPrice">0원</b>
+              </div>
+            </div>
+
+            <div class="trade-fields-card">
+              <div class="readonly-price-box">
+                <span>현재가 기준 체결</span>
+                <b id="currentTradePriceLabel">0원</b>
+              </div>
+
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="orderPrice">주문 가격</label>
+                  <input id="orderPrice" type="number" min="1" step="1" />
+                </div>
+                <div class="form-group">
+                  <label for="orderQty">수량</label>
+                  <input id="orderQty" type="number" min="1" step="1" value="1" />
+                </div>
+              </div>
+
+              <div class="quick-row" id="quickRow"></div>
+
+              <div class="estimate-box">
+                <div>
+                  <span>예상 주문금액</span>
+                  <b id="estimatedCost">0원</b>
+                </div>
+                <div>
+                  <span>예상 수수료</span>
+                  <b id="estimatedFee">0원</b>
+                </div>
+              </div>
+
+              <button class="primary-order-btn buy" id="submitOrderBtn" type="button">구매하기</button>
+            </div>
+
+            <div class="auto-sell-block">
+              <div class="auto-sell-head">
+                <h3 id="autoModeTitle">예약구매 · 조건매수</h3>
+                <p id="autoModeDesc">원하는 가격까지 내려오면 자동으로 매수할 수 있어요</p>
+              </div>
+
+              <div id="autoBuyModeBox">
+                <div class="auto-sell-grid">
+                  <div class="form-group">
+                    <label for="autoBuyTargetPrice">목표 매수가</label>
+                    <input id="autoBuyTargetPrice" type="number" min="1" step="1" placeholder="예: 43000" />
+                  </div>
+                  <div class="form-group">
+                    <label for="autoBuyQty">수량</label>
+                    <input id="autoBuyQty" type="number" min="1" step="1" value="1" />
+                  </div>
+                  <div class="form-group">
+                    <label for="autoBuyBudget">예산 제한</label>
+                    <input id="autoBuyBudget" type="number" min="0" step="1" placeholder="비워두면 제한 없음" />
+                  </div>
+                  <div class="checkbox-group">
+                    <label class="checkbox-label">
+                      <input id="autoBuyMax" type="checkbox" />
+                      <span>가능한 최대 수량</span>
+                    </label>
+                  </div>
+                </div>
+
+                <button class="auto-sell-add-btn" id="addAutoBuyBtn" type="button">예약구매 등록</button>
+
+                <div class="auto-sell-list-wrap">
+                  <div class="auto-sell-list-head">등록된 예약구매</div>
+                  <div class="auto-sell-list" id="autoBuyList"></div>
+                </div>
+              </div>
+
+              <div id="autoSellModeBox" class="hidden">
+                <div class="auto-sell-grid">
+                  <div class="form-group">
+                    <label for="autoSellTargetPrice">목표가</label>
+                    <input id="autoSellTargetPrice" type="number" min="0" step="1" placeholder="예: 52000" />
+                  </div>
+                  <div class="form-group">
+                    <label for="autoSellStopPrice">손절가</label>
+                    <input id="autoSellStopPrice" type="number" min="0" step="1" placeholder="예: 45000" />
+                  </div>
+                  <div class="form-group">
+                    <label for="autoSellQty">수량</label>
+                    <input id="autoSellQty" type="number" min="1" step="1" value="1" />
+                  </div>
+                  <div class="checkbox-group">
+                    <label class="checkbox-label">
+                      <input id="autoSellAll" type="checkbox" />
+                      <span>전량 사용</span>
+                    </label>
+                  </div>
+                </div>
+
+                <button class="auto-sell-add-btn" id="addAutoSellBtn" type="button">예약판매 등록</button>
+
+                <div class="auto-sell-list-wrap">
+                  <div class="auto-sell-list-head">등록된 예약판매</div>
+                  <div class="auto-sell-list" id="autoSellList"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel orderbook-panel">
+            <div class="panel-head orderbook-panel-head">
+              <div class="panel-title-box compact">
+                <h2>호가</h2>
+              </div>
+              <span class="live-chip">실시간</span>
+            </div>
+
+            <div class="orderbook-head">
+              <span>매도</span>
+              <span>가격</span>
+              <span>매수</span>
+            </div>
+
+            <div id="orderbookRows" class="orderbook-rows"></div>
+
+            <div class="orderbook-info">
+              <div class="orderbook-info-row">
+                <span>최고가 <b id="obHighPrice">0원</b></span>
+                <span>최저가 <b id="obLowPrice">0원</b></span>
+              </div>
+              <div class="orderbook-info-row">
+                <span>시가 <b id="obOpenPrice">0원</b></span>
+                <span>현재가 <b id="obCurrentPrice">0원</b></span>
+              </div>
+              <div class="order-strength">
+                <div class="order-strength-labels">
+                  <span>체결강도</span>
+                  <b id="orderStrengthValue">0.00%</b>
+                </div>
+                <div class="order-strength-bar">
+                  <div class="strength-sell" id="strengthSellBar"></div>
+                  <div class="strength-buy" id="strengthBuyBar"></div>
+                </div>
+                <div class="order-strength-meta">
+                  <span>판매대기 <b id="orderSellMeta">0</b></span>
+                  <span>구매대기 <b id="orderBuyMeta">0</b></span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="toss-side-panel">
+            <section class="panel portfolio-panel">
               <div class="panel-head">
-                <div class="section-title-box">
-                  <h2>주문 패널</h2>
-                  <p>현재가 기준 즉시 체결 · 자동매매 등록 가능</p>
-                </div>
-                <div class="order-mini-head">
-                  <span>보유 <b id="holdingQtyInline">0주</b></span>
-                  <span>평단 <b id="avgPriceInline">0원</b></span>
+                <div class="panel-title-box compact">
+                  <h2>내 자산</h2>
                 </div>
               </div>
 
-              <div class="order-summary-grid">
-                <div class="metric-card">
-                  <span>주문 가능 현금</span>
-                  <b id="availableCash">0원</b>
+              <div class="portfolio-big">
+                <div class="portfolio-total" id="portfolioTotal">0원</div>
+                <div class="portfolio-pl" id="portfolioPL">0원</div>
+              </div>
+
+              <div class="portfolio-grid">
+                <div class="portfolio-card">
+                  <span>예수금</span>
+                  <b id="portfolioCash">0원</b>
                 </div>
-                <div class="metric-card">
-                  <span>최대 매수 가능</span>
-                  <b id="maxBuyQty">0주</b>
+                <div class="portfolio-card">
+                  <span>주식평가</span>
+                  <b id="portfolioStockValue">0원</b>
                 </div>
-                <div class="metric-card">
-                  <span>보유 수량</span>
-                  <b id="currentHoldingQty">0주</b>
+                <div class="portfolio-card">
+                  <span>총 매입금액</span>
+                  <b id="portfolioInvested">0원</b>
                 </div>
-                <div class="metric-card">
-                  <span>평균 단가</span>
-                  <b id="currentAvgPrice">0원</b>
+                <div class="portfolio-card">
+                  <span>수익률</span>
+                  <b id="portfolioRate">0.00%</b>
                 </div>
               </div>
 
-              <div class="trade-mode-row">
-                <button class="trade-mode active" id="buyModeBtn" type="button">매수</button>
-                <button class="trade-mode" id="sellModeBtn" type="button">매도</button>
+              <div id="portfolioExtraBox" class="portfolio-grid extra-gap">
+                <div class="portfolio-card">
+                  <span>전체 수익률</span>
+                  <b id="portfolioAbsoluteRate">0.00%</b>
+                </div>
+                <div class="portfolio-card">
+                  <span>실현손익</span>
+                  <b id="portfolioRealized">0원</b>
+                </div>
+                <div class="portfolio-card">
+                  <span>기준선 이후</span>
+                  <b id="portfolioBaselineRate">0.00%</b>
+                </div>
+                <div class="portfolio-card">
+                  <span>평가손익</span>
+                  <b id="portfolioUnrealized">0원</b>
+                </div>
               </div>
 
-              <div class="trade-fields-card">
-                <div class="readonly-price-box">
-                  <span>현재가 기준 체결</span>
-                  <b id="currentTradePriceLabel">0원</b>
-                </div>
-
-                <div class="form-grid">
-                  <div class="form-group">
-                    <label for="orderPrice">주문 가격</label>
-                    <input id="orderPrice" type="number" min="1" step="1" />
-                    <small>항상 현재가로 체결돼요</small>
-                  </div>
-
-                  <div class="form-group">
-                    <label for="orderQty">수량</label>
-                    <input id="orderQty" type="number" min="1" step="1" value="1" />
-                    <small>주문할 수량을 입력해 주세요</small>
-                  </div>
-                </div>
-
-                <div class="quick-row" id="quickRow"></div>
-
-                <div class="estimate-box">
-                  <div>
-                    <span>예상 주문금액</span>
-                    <b id="estimatedCost">0원</b>
-                  </div>
-                  <div>
-                    <span>예상 수수료</span>
-                    <b id="estimatedFee">0원</b>
-                  </div>
-                </div>
-
-                <button class="primary-order-btn buy" id="submitOrderBtn" type="button">매수 실행</button>
-              </div>
-
-              <div class="auto-sell-block">
-                <div class="auto-sell-head">
-                  <h3 id="autoModeTitle">예약구매 · 조건매수</h3>
-                  <p id="autoModeDesc">원하는 가격까지 내려오면 자동으로 매수할 수 있어요</p>
-                </div>
-
-                <div id="autoBuyModeBox">
-                  <div class="auto-sell-grid">
-                    <div class="form-group">
-                      <label for="autoBuyTargetPrice">목표 매수가</label>
-                      <input id="autoBuyTargetPrice" type="number" min="1" step="1" placeholder="예: 43000" />
-                    </div>
-
-                    <div class="form-group">
-                      <label for="autoBuyQty">수량</label>
-                      <input id="autoBuyQty" type="number" min="1" step="1" value="1" />
-                    </div>
-
-                    <div class="form-group">
-                      <label for="autoBuyBudget">예산 제한</label>
-                      <input id="autoBuyBudget" type="number" min="0" step="1" placeholder="비워두면 제한 없음" />
-                    </div>
-
-                    <div class="checkbox-group">
-                      <label class="checkbox-label">
-                        <input id="autoBuyMax" type="checkbox" />
-                        <span>가능한 최대 수량</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <button class="auto-sell-add-btn" id="addAutoBuyBtn" type="button">예약구매 등록</button>
-
-                  <div class="auto-sell-list-wrap">
-                    <div class="auto-sell-list-head">등록된 예약구매</div>
-                    <div class="auto-sell-list" id="autoBuyList"></div>
-                  </div>
-                </div>
-
-                <div id="autoSellModeBox" class="hidden">
-                  <div class="auto-sell-grid">
-                    <div class="form-group">
-                      <label for="autoSellTargetPrice">목표가</label>
-                      <input id="autoSellTargetPrice" type="number" min="0" step="1" placeholder="예: 52000" />
-                    </div>
-
-                    <div class="form-group">
-                      <label for="autoSellStopPrice">손절가</label>
-                      <input id="autoSellStopPrice" type="number" min="0" step="1" placeholder="예: 45000" />
-                    </div>
-
-                    <div class="form-group">
-                      <label for="autoSellQty">수량</label>
-                      <input id="autoSellQty" type="number" min="1" step="1" value="1" />
-                    </div>
-
-                    <div class="checkbox-group">
-                      <label class="checkbox-label">
-                        <input id="autoSellAll" type="checkbox" />
-                        <span>전량 사용</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <button class="auto-sell-add-btn" id="addAutoSellBtn" type="button">예약판매 등록</button>
-
-                  <div class="auto-sell-list-wrap">
-                    <div class="auto-sell-list-head">등록된 예약판매</div>
-                    <div class="auto-sell-list" id="autoSellList"></div>
-                  </div>
-                </div>
+              <div class="portfolio-actions">
+                <button class="top-action-btn control-btn" id="resetBaselineBtn" type="button">수익률 기준 리셋</button>
+                <button class="top-action-btn control-btn" id="toggleActiveOrdersBtn" type="button">자동매매 비우기</button>
               </div>
             </section>
 
-            <section class="panel orderbook-panel">
-              <div class="panel-head">
-                <div class="section-title-box">
-                  <h2>호가창</h2>
-                  <p>매도 · 가격 · 매수 3열 구조</p>
+            <section class="panel watchlist-panel">
+              <div class="panel-head watchlist-top">
+                <div class="panel-title-box compact">
+                  <h2>관심종목</h2>
                 </div>
-                <span class="live-chip">실시간</span>
+
+                <div class="sort-row">
+                  <button type="button" class="sort-btn active" data-sort="change">등락률순</button>
+                  <button type="button" class="sort-btn" data-sort="volume">거래량순</button>
+                </div>
               </div>
 
-              <div class="orderbook-head">
-                <span>매도</span>
-                <span>가격</span>
-                <span>매수</span>
+              <div class="filter-row">
+                <input type="text" id="searchInput" placeholder="종목 검색" />
               </div>
 
-              <div id="orderbookRows" class="orderbook-rows"></div>
+              <div class="section-subtitle">즐겨찾기</div>
+              <div id="favoritesList" class="watchlist-block empty-state-box">즐겨찾기한 종목이 아직 없어요</div>
+
+              <div class="section-subtitle with-badge">
+                전체 종목
+                <span class="badge inline-badge" id="marketAlertBadge">0</span>
+              </div>
+
+              <div id="watchlist" class="watchlist"></div>
             </section>
-          </div>
+          </aside>
         </section>
 
         <section class="bottom-grid">
           <section class="panel news-panel">
             <div class="panel-head">
-              <div class="section-title-box">
+              <div class="panel-title-box compact">
                 <h2>전체 뉴스 피드</h2>
-                <p>시장 전체 흐름과 이벤트를 확인해요</p>
               </div>
               <span class="small-chip" id="newsCountChip">0건</span>
             </div>
@@ -341,9 +493,8 @@
           <section class="panel history-panel">
             <div class="panel-head">
               <div class="panel-left-head">
-                <div class="section-title-box">
+                <div class="panel-title-box compact">
                   <h2>기록</h2>
-                  <p>주문 내역과 알림 이력을 볼 수 있어요</p>
                 </div>
                 <div class="history-tabs">
                   <button class="history-tab active" type="button" data-history-tab="orders">주문</button>
@@ -358,103 +509,17 @@
           </section>
         </section>
       </section>
-
-      <aside class="right-zone">
-        <section class="panel portfolio-panel">
-          <div class="panel-head">
-            <div class="section-title-box">
-              <h2>내 자산</h2>
-              <p>총 자산 · 손익 · 비중을 실시간으로 확인해요</p>
-            </div>
-          </div>
-
-          <div class="portfolio-big">
-            <div class="portfolio-total" id="portfolioTotal">0원</div>
-            <div class="portfolio-pl" id="portfolioPL">0원</div>
-          </div>
-
-          <div class="portfolio-grid">
-            <div class="portfolio-card">
-              <span>예수금</span>
-              <b id="portfolioCash">0원</b>
-            </div>
-            <div class="portfolio-card">
-              <span>주식평가</span>
-              <b id="portfolioStockValue">0원</b>
-            </div>
-            <div class="portfolio-card">
-              <span>총 매입금액</span>
-              <b id="portfolioInvested">0원</b>
-            </div>
-            <div class="portfolio-card">
-              <span>수익률</span>
-              <b id="portfolioRate">0.00%</b>
-            </div>
-          </div>
-
-          <div id="portfolioExtraBox" class="portfolio-grid">
-            <div class="portfolio-card">
-              <span>전체 수익률</span>
-              <b id="portfolioAbsoluteRate">0.00%</b>
-            </div>
-            <div class="portfolio-card">
-              <span>실현손익</span>
-              <b id="portfolioRealized">0원</b>
-            </div>
-            <div class="portfolio-card">
-              <span>기준선 이후</span>
-              <b id="portfolioBaselineRate">0.00%</b>
-            </div>
-            <div class="portfolio-card">
-              <span>평가손익</span>
-              <b id="portfolioUnrealized">0원</b>
-            </div>
-          </div>
-
-          <div class="portfolio-actions">
-            <button class="top-action-btn control-btn" id="resetBaselineBtn" type="button">수익률 기준 리셋</button>
-            <button class="top-action-btn control-btn" id="toggleActiveOrdersBtn" type="button">자동매매 비우기</button>
-          </div>
-        </section>
-
-        <section class="panel watchlist-panel">
-          <div class="panel-head watchlist-top">
-            <div class="section-title-box">
-              <h2>관심종목</h2>
-              <p>오른쪽 고정 패널에서 빠르게 확인해요</p>
-            </div>
-            <div class="sort-row">
-              <button type="button" class="sort-btn active" data-sort="change">등락률순</button>
-              <button type="button" class="sort-btn" data-sort="volume">거래량순</button>
-            </div>
-          </div>
-
-          <div class="filter-row">
-            <input type="text" id="searchInput" placeholder="종목 검색" />
-          </div>
-
-          <div class="section-subtitle">즐겨찾기</div>
-          <div id="favoritesList" class="watchlist-block empty-state-box">즐겨찾기한 종목이 아직 없어요</div>
-
-          <div class="section-subtitle with-badge">
-            전체 종목
-            <span class="badge inline-badge" id="marketAlertBadge">0</span>
-          </div>
-
-          <div id="watchlist" class="watchlist"></div>
-        </section>
-      </aside>
     </main>
   </div>
 
   <div id="adminOverlay" class="hidden">
-    <div id="adminModal">
-      <div class="admin-header">
-        <div>
-          <div class="admin-title">관리자 패널</div>
-          <div class="admin-sub">가격 조정 · 상하한 · 고정가 · 시장 설정</div>
+    <div id="adminLoginModal" class="admin-floating-card">
+      <div class="admin-modal-head">
+        <div class="admin-title-wrap">
+          <div class="admin-title">관리자 로그인</div>
+          <div class="admin-sub">코드를 입력하면 고급 설정을 열 수 있어요</div>
         </div>
-        <button id="closeAdminModalBtn" class="top-action-btn control-btn" type="button">닫기</button>
+        <button id="closeAdminModalBtn" class="admin-close-btn" type="button">✕</button>
       </div>
 
       <div id="adminLoginBox">
@@ -465,17 +530,20 @@
       </div>
 
       <div id="adminPanelBox" class="hidden">
+        <div class="admin-panel-header-row">
+          <div class="admin-panel-title">관리자 패널</div>
+          <div class="admin-panel-sub">체크 즉시 반영 · 가격 수정 · 상하한 관리</div>
+        </div>
+
         <div class="admin-grid">
           <label>
             초기 자산
             <input id="adminInitialCash" type="number" min="10000" step="1000" />
           </label>
-
           <label>
             긴급지원금
             <input id="adminSupportAmount" type="number" min="0" step="1000" />
           </label>
-
           <label>
             지원금 사용 기준
             <input id="adminSupportLimit" type="number" min="0" step="1000" />
@@ -485,12 +553,10 @@
             수수료율
             <input id="adminFeeRate" type="number" min="0" step="0.0001" />
           </label>
-
           <label>
             변동성
             <input id="adminVolatility" type="number" min="0.2" step="0.1" />
           </label>
-
           <label>
             뉴스 빈도
             <input id="adminNewsFreq" type="number" min="0.2" step="0.1" />
@@ -500,12 +566,10 @@
             상한율
             <input id="adminUpperLimitRate" type="number" min="0.05" step="0.01" />
           </label>
-
           <label>
             하한율
             <input id="adminLowerLimitRate" type="number" min="0.05" step="0.01" />
           </label>
-
           <label class="admin-check">
             <span>상하한 활성화</span>
             <input id="adminDailyLimitEnabled" type="checkbox" />
@@ -522,12 +586,10 @@
             종목 선택
             <select id="adminStockSelect"></select>
           </label>
-
           <label>
             현재가 수정
             <input id="adminStockPrice" type="number" min="1" step="1" />
           </label>
-
           <label class="admin-check">
             <span>가격 고정</span>
             <input id="adminStockFixed" type="checkbox" />
