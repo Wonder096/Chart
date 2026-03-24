@@ -350,6 +350,7 @@ function loadState() {
     fresh.eventTicks = Math.max(0, toInt(old.eventTicks, 0));
     fresh.flash = 0;
     fresh.haltedDirection = old.haltedDirection || null;
+    fresh.isFixed = !!old.isFixed;
     return fresh;
   });
 
@@ -426,7 +427,7 @@ function buildOrderbook(stock) {
 
   const asks = [];
   const bids = [];
-  for (let i = 8; i >= 1; i--) {
+  for (let i = 12; i >= 1; i--) {
     const step = Math.max(1, Math.round(base * spreadFactor * i));
     asks.push({
       type: "ask",
@@ -434,7 +435,7 @@ function buildOrderbook(stock) {
       qty: randInt(900, 4200)
     });
   }
-  for (let i = 1; i <= 8; i++) {
+  for (let i = 1; i <= 12; i++) {
     const step = Math.max(1, Math.round(base * spreadFactor * i));
     bids.push({
       type: "bid",
@@ -560,6 +561,11 @@ function maybeCreateNews(stock) {
 
 function updateOneStock(stock) {
   if (!stock) return;
+  if (stock.isFixed) {
+    stock.flash = 0;
+    buildOrderbook(stock);
+    return;
+  }
 
   maybeCreateNews(stock);
 
@@ -622,460 +628,367 @@ function updateOneStock(stock) {
   buildOrderbook(stock);
   stock.flash = next > oldPrice ? 1 : next < oldPrice ? -1 : 0;
 }
+function processAutoOrders() {
+  const stocksByCode = new Map(state.stocks.map(s => [s.code, s]));
 
-function executeBuy(code, qty, price, reason = "현재가 매수") {
-  const stock = state.stocks.find(s => s.code === code);
-  if (!stock) return false;
-  qty = Math.max(0, toInt(qty, 0));
-  if (qty <= 0) return false;
+  if (Array.isArray(state.autoBuyOrders) && state.autoBuyOrders.length) {
+    const remain = [];
+    for (const order of state.autoBuyOrders) {
+      const stock = stocksByCode.get(order.code);
+      if (!stock) continue;
 
-  const amount = price * qty;
-  const fee = feeOf(amount);
-  const total = amount + fee;
-  if (state.portfolio.cash < total) {
-    toast("현금이 부족해요.", "down");
+      if (stock.haltedDirection === "down") {
+        remain.push(order);
+        continue;
+      }
+
+      const targetPrice = Math.max(1, toInt(order.targetPrice, 0));
+      const wantedQty = Math.max(1, toInt(order.qty, 0));
+      const budget = Math.max(0, toInt(order.budget, 0));
+      const useMax = !!order.useMax;
+
+      if (stock.currentPrice <= targetPrice) {
+        let qty = wantedQty;
+
+        if (useMax) {
+          qty = calculateMaxBuyQty(stock.currentPrice);
+        } else if (budget > 0) {
+          const maxByBudget = Math.floor(budget / (stock.currentPrice * (1 + state.settings.feeRate)));
+          qty = Math.min(qty, Math.max(0, maxByBudget));
+        }
+
+        if (qty > 0) {
+          const done = executeBuy(stock, qty, stock.currentPrice, true, "예약구매");
+          if (!done) remain.push(order);
+        }
+      } else {
+        remain.push(order);
+      }
+    }
+    state.autoBuyOrders = remain;
+  }
+
+  if (Array.isArray(state.autoSellOrders) && state.autoSellOrders.length) {
+    const remain = [];
+    for (const order of state.autoSellOrders) {
+      const stock = stocksByCode.get(order.code);
+      if (!stock) continue;
+
+      if (stock.haltedDirection === "down") {
+        remain.push(order);
+        continue;
+      }
+
+      const holding = holdingOf(order.code);
+      if (holding.qty <= 0) continue;
+
+      const targetPrice = Math.max(0, toInt(order.targetPrice, 0));
+      const stopPrice = Math.max(0, toInt(order.stopPrice, 0));
+      const useAll = !!order.useAll;
+      const wantedQty = Math.max(1, toInt(order.qty, 0));
+
+      const hitTarget = targetPrice > 0 && stock.currentPrice >= targetPrice;
+      const hitStop = stopPrice > 0 && stock.currentPrice <= stopPrice;
+
+      if (hitTarget || hitStop) {
+        const qty = useAll ? holding.qty : Math.min(holding.qty, wantedQty);
+        if (qty > 0) {
+          const reason = hitTarget ? "예약판매" : "손절판매";
+          const done = executeSell(stock, qty, stock.currentPrice, true, reason);
+          if (!done && holding.qty > 0) remain.push(order);
+        }
+      } else {
+        remain.push(order);
+      }
+    }
+    state.autoSellOrders = remain;
+  }
+}
+
+function calculateMaxBuyQty(price) {
+  const p = Math.max(1, toNum(price, 0));
+  if (p <= 0) return 0;
+  const unitCost = p * (1 + state.settings.feeRate);
+  if (unitCost <= 0) return 0;
+  return Math.max(0, Math.floor(state.portfolio.cash / unitCost));
+}
+
+function resetBaseline() {
+  state.baseline = {
+    totalAsset: totalAsset(),
+    startedAt: state.virtualTime || Date.now()
+  };
+  queueSave();
+  renderAll();
+  toast("수익률 기준선이 현재 자산 기준으로 초기화됐어요", "event");
+}
+
+function resetAllData() {
+  defaultState();
+  queueSave();
+  renderAll();
+  toast("전체 데이터가 초기화됐어요", "event");
+}
+
+function maybeSupportFund() {
+  const limit = Math.max(0, toInt(state.settings.supportFundCashLimit, 0));
+  const amount = Math.max(0, toInt(state.settings.supportFundAmount, 0));
+  if (state.portfolio.cash > limit) {
+    toast("긴급지원금은 현금이 기준 이하일 때만 받을 수 있어요", "down");
+    return;
+  }
+  state.portfolio.cash += amount;
+  queueSave();
+  renderAll();
+  toast(`긴급지원금 ${formatKRW(amount)}이 지급됐어요`, "up");
+}
+
+function clearHistories() {
+  if (state.historyTab === "orders") state.orderHistory = [];
+  else state.alerts = [];
+  queueSave();
+  renderHistory();
+}
+
+function executeBuy(stock, qty, price, isAuto = false, reason = "매수") {
+  if (!stock || qty <= 0 || price <= 0) return false;
+  if (stock.haltedDirection === "down") {
+    toast(`${stock.name}은 현재 VI 상태라 거래할 수 없어요`, "down");
     return false;
   }
 
-  const h = holdingOf(code);
-  const newQty = h.qty + qty;
-  const newAvg = newQty > 0 ? (((h.avgPrice * h.qty) + amount) / newQty) : 0;
+  const gross = qty * price;
+  const fee = feeOf(gross);
+  const total = gross + fee;
+
+  if (state.portfolio.cash < total) {
+    if (!isAuto) toast("주문 가능 현금이 부족해요", "down");
+    return false;
+  }
 
   state.portfolio.cash -= total;
-  state.portfolio.holdings[code] = { qty: newQty, avgPrice: newAvg };
-  recordOrder({ type: "buy", stockName: stock.name, code, qty, price, fee, total, reason });
+
+  const holding = holdingOf(stock.code);
+  const oldQty = holding.qty || 0;
+  const oldAvg = holding.avgPrice || 0;
+  const newQty = oldQty + qty;
+  const newAvg = newQty > 0 ? ((oldQty * oldAvg) + (qty * price)) / newQty : 0;
+
+  state.portfolio.holdings[stock.code] = {
+    qty: newQty,
+    avgPrice: newAvg
+  };
+
+  recordOrder({
+    side: "buy",
+    type: reason,
+    code: stock.code,
+    name: stock.name,
+    qty,
+    price,
+    fee,
+    total
+  });
+
+  addAlert(`${stock.name} ${formatQty(qty)} ${reason} 완료`, "up");
+  queueSave();
+  renderAll();
   return true;
 }
 
-function executeSell(code, qty, price, reason = "현재가 매도") {
-  const stock = state.stocks.find(s => s.code === code);
-  if (!stock) return false;
-  qty = Math.max(0, toInt(qty, 0));
-  if (qty <= 0) return false;
-
-  const h = holdingOf(code);
-  if (h.qty < qty) {
-    toast("보유 수량이 부족해요.", "down");
+function executeSell(stock, qty, price, isAuto = false, reason = "매도") {
+  if (!stock || qty <= 0 || price <= 0) return false;
+  if (stock.haltedDirection === "down") {
+    toast(`${stock.name}은 현재 VI 상태라 거래할 수 없어요`, "down");
     return false;
   }
 
-  const amount = price * qty;
-  const fee = feeOf(amount);
-  const total = amount - fee;
-
-  state.portfolio.cash += total;
-  state.realizedProfit += ((price - h.avgPrice) * qty) - fee;
-
-  if (h.qty === qty) {
-    delete state.portfolio.holdings[code];
-  } else {
-    state.portfolio.holdings[code] = { qty: h.qty - qty, avgPrice: h.avgPrice };
+  const holding = holdingOf(stock.code);
+  if (holding.qty < qty) {
+    if (!isAuto) toast("보유 수량이 부족해요", "down");
+    return false;
   }
+
+  const gross = qty * price;
+  const fee = feeOf(gross);
+  const net = gross - fee;
+  const realized = (price - holding.avgPrice) * qty - fee;
+
+  state.realizedProfit += realized;
+  state.portfolio.cash += net;
+
+  const newQty = holding.qty - qty;
+  if (newQty <= 0) {
+    delete state.portfolio.holdings[stock.code];
+  } else {
+    state.portfolio.holdings[stock.code] = {
+      qty: newQty,
+      avgPrice: holding.avgPrice
+    };
+  }
+
+  recordOrder({
+    side: "sell",
+    type: reason,
+    code: stock.code,
+    name: stock.name,
+    qty,
+    price,
+    fee,
+    total: net,
+    realized
+  });
+
+  addAlert(`${stock.name} ${formatQty(qty)} ${reason} 완료`, realized >= 0 ? "up" : "down");
 
   if (!hasAnyHolding()) {
-    state.realizedProfit = 0;
-    state.baseline = { totalAsset: totalAsset(), startedAt: Date.now() };
+    state.baseline = {
+      totalAsset: totalAsset(),
+      startedAt: state.virtualTime || Date.now()
+    };
   }
 
-  recordOrder({ type: "sell", stockName: stock.name, code, qty, price, fee, total, reason });
+  queueSave();
+  renderAll();
   return true;
 }
 
-function processAutoOrders() {
-  const removeSellIds = [];
-  state.autoSellOrders.forEach(order => {
-    const stock = state.stocks.find(s => s.code === order.code);
-    if (!stock) { removeSellIds.push(order.id); return; }
+function submitManualOrder() {
+  const stock = selectedStock();
+  if (!stock) return;
 
-    const holding = holdingOf(order.code);
-    if (holding.qty <= 0) { removeSellIds.push(order.id); return; }
+  const qty = Math.max(1, toInt(els.orderQty?.value, 1));
+  const price = stock.currentPrice;
 
-    const hitTarget = order.targetPrice > 0 && stock.currentPrice >= order.targetPrice;
-    const hitStop = order.stopPrice > 0 && stock.currentPrice <= order.stopPrice;
-    if (!hitTarget && !hitStop) return;
-
-    const qty = order.all ? holding.qty : Math.min(holding.qty, order.qty);
-    if (qty <= 0) { removeSellIds.push(order.id); return; }
-
-    executeSell(order.code, qty, stock.currentPrice, hitTarget ? "예약판매(목표가)" : "예약판매(손절가)");
-    removeSellIds.push(order.id);
-  });
-
-  if (removeSellIds.length) {
-    state.autoSellOrders = state.autoSellOrders.filter(x => !removeSellIds.includes(x.id));
-  }
-
-  const removeBuyIds = [];
-  state.autoBuyOrders.forEach(order => {
-    const stock = state.stocks.find(s => s.code === order.code);
-    if (!stock) { removeBuyIds.push(order.id); return; }
-    if (stock.currentPrice > order.targetPrice) return;
-
-    let qty = order.useMax
-      ? Math.max(0, Math.floor(state.portfolio.cash / (stock.currentPrice + feeOf(stock.currentPrice))))
-      : Math.max(0, toInt(order.qty, 0));
-
-    if (order.budgetLimit > 0) {
-      qty = Math.min(qty, Math.max(0, Math.floor(order.budgetLimit / (stock.currentPrice + feeOf(stock.currentPrice)))));
-    }
-
-    if (qty <= 0) { removeBuyIds.push(order.id); return; }
-
-    const total = (stock.currentPrice * qty) + feeOf(stock.currentPrice * qty);
-    if (state.portfolio.cash < total) {
-      removeBuyIds.push(order.id);
-      return;
-    }
-
-    executeBuy(order.code, qty, stock.currentPrice, "자동구매(예약구매)");
-    removeBuyIds.push(order.id);
-  });
-
-  if (removeBuyIds.length) {
-    state.autoBuyOrders = state.autoBuyOrders.filter(x => !removeBuyIds.includes(x.id));
+  if (state.orderMode === "buy") {
+    executeBuy(stock, qty, price, false, "매수");
+  } else {
+    executeSell(stock, qty, price, false, "매도");
   }
 }
 
-function getSpeedProfile(speed) {
-  const map = {
-    1: { delay: 1000, loops: 1, chartEvery: 1 },
-    2: { delay: 520, loops: 2, chartEvery: 1 },
-    5: { delay: 220, loops: 3, chartEvery: 1 },
-    10: { delay: 120, loops: 4, chartEvery: 2 },
-    20: { delay: 70, loops: 6, chartEvery: 3 },
-    50: { delay: 32, loops: 10, chartEvery: 5 },
-    100: { delay: 18, loops: 16, chartEvery: 8 },
-    200: { delay: 10, loops: 24, chartEvery: 12 },
-    300: { delay: 7, loops: 32, chartEvery: 16 }
-  };
-  return map[speed] || map[1];
-}
+function submitAutoBuy() {
+  const stock = selectedStock();
+  if (!stock) return;
 
-function tickOnce() {
-  if (state.isPaused || state.isStopped) return;
+  const targetPrice = Math.max(1, toInt(els.autoBuyTargetPrice?.value, 0));
+  const qty = Math.max(1, toInt(els.autoBuyQty?.value, 1));
+  const budget = Math.max(0, toInt(els.autoBuyBudget?.value, 0));
+  const useMax = !!els.autoBuyMax?.checked;
 
-  const profile = getSpeedProfile(state.speed);
-  for (let i = 0; i < profile.loops; i++) {
-    rollVirtualTime();
-    state.stocks.forEach(updateOneStock);
-    processAutoOrders();
+  if (!targetPrice) {
+    toast("목표 매수가를 입력해 주세요", "down");
+    return;
   }
 
-  state.chartRenderCounter += 1;
-  render(state.chartRenderCounter % profile.chartEvery === 0);
+  state.autoBuyOrders.unshift({
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    code: stock.code,
+    name: stock.name,
+    targetPrice,
+    qty,
+    budget,
+    useMax,
+    createdAt: nowTime()
+  });
+
+  if (els.autoBuyTargetPrice) els.autoBuyTargetPrice.value = "";
+  if (els.autoBuyQty) els.autoBuyQty.value = "1";
+  if (els.autoBuyBudget) els.autoBuyBudget.value = "";
+  if (els.autoBuyMax) els.autoBuyMax.checked = false;
+
   queueSave();
+  renderAutoLists();
+  toast(`${stock.name} 예약구매가 등록됐어요`, "event");
 }
 
-function restartTick() {
-  clearTimeout(tickTimer);
-  const loop = () => {
-    tickOnce();
-    tickTimer = setTimeout(loop, getSpeedProfile(state.speed).delay);
-  };
-  tickTimer = setTimeout(loop, getSpeedProfile(state.speed).delay);
+function submitAutoSell() {
+  const stock = selectedStock();
+  if (!stock) return;
+
+  const targetPrice = Math.max(0, toInt(els.autoSellTargetPrice?.value, 0));
+  const stopPrice = Math.max(0, toInt(els.autoSellStopPrice?.value, 0));
+  const qty = Math.max(1, toInt(els.autoSellQty?.value, 1));
+  const useAll = !!els.autoSellAll?.checked;
+
+  if (!targetPrice && !stopPrice) {
+    toast("목표가 또는 손절가 중 하나는 입력해 주세요", "down");
+    return;
+  }
+
+  state.autoSellOrders.unshift({
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    code: stock.code,
+    name: stock.name,
+    targetPrice,
+    stopPrice,
+    qty,
+    useAll,
+    createdAt: nowTime()
+  });
+
+  if (els.autoSellTargetPrice) els.autoSellTargetPrice.value = "";
+  if (els.autoSellStopPrice) els.autoSellStopPrice.value = "";
+  if (els.autoSellQty) els.autoSellQty.value = "1";
+  if (els.autoSellAll) els.autoSellAll.checked = false;
+
+  queueSave();
+  renderAutoLists();
+  toast(`${stock.name} 예약판매가 등록됐어요`, "event");
 }
 
-function collectEls() {
-  [
-    "totalAssetTop","profitLossTop","cashTop","supportFundBtn","pauseBtn","resumeBtn","stopBtn","resetBtn","alertBellBtn","alertBadge",
-    "symbolLogo","selectedName","selectedCode","heroStockSelect","selectedPrice","selectedChange","dayHigh","dayLow","dayOpen","dayVolume",
-    "speedButtons","moodFill","moodText","priceChart","chartTooltip","selectedNewsTitleName","selectedNewsCount","selectedNewsFeed",
-    "holdingQtyInline","avgPriceInline","availableCash","maxBuyQty","currentHoldingQty","currentAvgPrice","buyModeBtn","sellModeBtn",
-    "currentTradePriceLabel","orderPrice","orderQty","quickRow","estimatedCost","estimatedFee","submitOrderBtn",
-    "autoSellTargetPrice","autoSellStopPrice","autoSellQty","autoSellAll","addAutoSellBtn","autoSellList","orderbookRows",
-    "newsCountChip","newsFeed","clearHistoryBtn","orderHistoryList","alertHistoryList","portfolioTotal","portfolioPL","portfolioCash",
-    "portfolioStockValue","portfolioInvested","portfolioRate","searchInput","favoritesList","marketAlertBadge","watchlist",
-    "favoriteToggleBtn"
-  ].forEach(id => els[id] = byId(id));
-
-  els.resetBaselineBtn = byId("resetBaselineBtn");
-  els.toggleActiveOrdersBtn = byId("toggleActiveOrdersBtn");
-  els.adminEntryBtn = byId("adminEntryBtn");
-  els.saveSlotBtn = byId("saveSlotBtn");
-  els.loadSlotBtn = byId("loadSlotBtn");
-
-  els.autoBuyTargetPrice = byId("autoBuyTargetPrice");
-  els.autoBuyQty = byId("autoBuyQty");
-  els.autoBuyBudget = byId("autoBuyBudget");
-  els.autoBuyMax = byId("autoBuyMax");
-  els.autoBuyList = byId("autoBuyList");
-  els.adminOverlay = byId("adminOverlay");
-  els.adminCodeInput = byId("adminCodeInput");
-  els.adminLoginBtn = byId("adminLoginBtn");
-  els.closeAdminModalBtn = byId("closeAdminModalBtn");
-  els.adminLoginBox = byId("adminLoginBox");
-  els.adminPanelBox = byId("adminPanelBox");
-  els.adminInitialCash = byId("adminInitialCash");
-  els.adminSupportAmount = byId("adminSupportAmount");
-  els.adminSupportLimit = byId("adminSupportLimit");
-  els.adminFeeRate = byId("adminFeeRate");
-  els.adminVolatility = byId("adminVolatility");
-  els.adminNewsFreq = byId("adminNewsFreq");
-  els.adminHighSpeedEnabled = byId("adminHighSpeedEnabled");
-  els.adminStockSelect = byId("adminStockSelect");
-  els.adminStockPrice = byId("adminStockPrice");
-  els.saveAdminSettingsBtn = byId("saveAdminSettingsBtn");
-  els.applyAdminStockPriceBtn = byId("applyAdminStockPriceBtn");
-  els.forceBaselineResetBtn = byId("forceBaselineResetBtn");
-  els.adminCancelAllAutoSellBtn = byId("adminCancelAllAutoSellBtn");
-  els.adminCancelAllAutoBuyBtn = byId("adminCancelAllAutoBuyBtn");
-  els.adminResetAllBtn = byId("adminResetAllBtn");
-  els.adminDailyLimitEnabled = byId("adminDailyLimitEnabled");
-  els.adminUpperLimitRate = byId("adminUpperLimitRate");
-  els.adminLowerLimitRate = byId("adminLowerLimitRate");
+function removeAutoBuy(id) {
+  state.autoBuyOrders = state.autoBuyOrders.filter(x => x.id !== id);
+  queueSave();
+  renderAutoLists();
 }
 
-function injectExtraUI() {
-  document.title = "주식 모의증권";
-  const brandTitle = q(".brand-title");
-  if (brandTitle) brandTitle.textContent = "주식 모의증권";
-  const brandSub = q(".brand-sub");
-  if (brandSub) brandSub.textContent = "Advanced Dark Trading UI";
-
-  const topSummaryRow = q(".top-summary-row");
-  if (topSummaryRow && !byId("virtualClockChip")) {
-    const div = document.createElement("div");
-    div.id = "virtualClockChip";
-    div.className = "summary-card";
-    div.innerHTML = `<div class="summary-label">가상시간</div><div class="summary-value" style="font-size:15px">${formatVirtualDateTime()}</div>`;
-    topSummaryRow.appendChild(div);
-  }
-
-  const headerActions = q(".header-actions");
-  if (headerActions && !byId("saveSlotBtn")) {
-    const saveBtn = document.createElement("button");
-    saveBtn.id = "saveSlotBtn";
-    saveBtn.className = "top-action-btn control-btn";
-    saveBtn.type = "button";
-    saveBtn.textContent = "저장";
-
-    const loadBtn = document.createElement("button");
-    loadBtn.id = "loadSlotBtn";
-    loadBtn.className = "top-action-btn control-btn";
-    loadBtn.type = "button";
-    loadBtn.textContent = "불러오기";
-
-    const adminBtn = document.createElement("button");
-    adminBtn.id = "adminEntryBtn";
-    adminBtn.className = "top-action-btn control-btn";
-    adminBtn.type = "button";
-    adminBtn.textContent = "관리자";
-
-    headerActions.insertBefore(saveBtn, byId("pauseBtn"));
-    headerActions.insertBefore(loadBtn, byId("pauseBtn"));
-    headerActions.insertBefore(adminBtn, byId("pauseBtn"));
-  }
-
-  const portfolioPanel = q(".portfolio-panel");
-  if (portfolioPanel && !byId("portfolioExtraBox")) {
-    const extra = document.createElement("div");
-    extra.id = "portfolioExtraBox";
-    extra.className = "portfolio-grid";
-    extra.innerHTML = `
-      <div class="portfolio-card"><span>전체 수익률</span><b id="portfolioAbsoluteRate">0.00%</b></div>
-      <div class="portfolio-card"><span>실현손익</span><b id="portfolioRealized">0원</b></div>
-      <div class="portfolio-card"><span>기준선 이후</span><b id="portfolioBaselineRate">0.00%</b></div>
-      <div class="portfolio-card"><span>평가손익</span><b id="portfolioUnrealized">0원</b></div>
-    `;
-    extra.style.marginTop = "12px";
-    portfolioPanel.appendChild(extra);
-
-    const actionRow = document.createElement("div");
-    actionRow.className = "header-actions";
-    actionRow.style.justifyContent = "stretch";
-    actionRow.style.marginTop = "12px";
-    actionRow.innerHTML = `
-      <button class="top-action-btn control-btn" id="resetBaselineBtn" type="button" style="flex:1">수익률 기준 리셋</button>
-      <button class="top-action-btn control-btn" id="toggleActiveOrdersBtn" type="button" style="flex:1">자동매매 보기</button>
-    `;
-    portfolioPanel.appendChild(actionRow);
-  }
-
-  const chartTabs = q(".chart-tabs");
-  if (chartTabs) {
-    chartTabs.innerHTML = CHART_RANGES.map(r => `<button type="button" class="tab-btn ${r.key === state.chartRange ? "active" : ""}" data-chart-range="${r.key}">${r.label}</button>`).join("");
-  }
-
-  const autoSellBlock = q(".auto-sell-block");
-  if (autoSellBlock && !byId("autoBuyTargetPrice")) {
-    const autoBuy = document.createElement("div");
-    autoBuy.className = "auto-sell-block";
-    autoBuy.style.marginTop = "12px";
-    autoBuy.innerHTML = `
-      <div class="auto-sell-head">
-        <h3 id="autoModeTitle">예약판매 · 자동매도</h3>
-        <p id="autoModeDesc">원하는 가격에 도달하면 자동으로 매도할 수 있어요</p>
-      </div>
-
-      <div id="autoSellModeBox">
-        <div class="auto-sell-grid">
-          <div class="form-group">
-            <label for="autoSellTargetPrice">목표가</label>
-            <input id="autoSellTargetPrice" type="number" min="1" step="1" placeholder="예: 52000" />
-          </div>
-
-          <div class="form-group">
-            <label for="autoSellStopPrice">손절가</label>
-            <input id="autoSellStopPrice" type="number" min="1" step="1" placeholder="예: 45000" />
-          </div>
-
-          <div class="form-group">
-            <label for="autoSellQty">수량</label>
-            <input id="autoSellQty" type="number" min="1" step="1" value="1" />
-          </div>
-
-          <div class="checkbox-group">
-            <label class="checkbox-label">
-              <input id="autoSellAll" type="checkbox" />
-              <span>전량으로 팔기</span>
-            </label>
-          </div>
-        </div>
-
-        <button class="auto-sell-add-btn" id="addAutoSellBtn" type="button">자동매도 등록</button>
-
-        <div class="auto-sell-list-wrap">
-          <div class="auto-sell-list-head">등록된 자동매도</div>
-          <div class="auto-sell-list" id="autoSellList"></div>
-        </div>
-      </div>
-
-      <div id="autoBuyModeBox" class="hidden">
-        <div class="auto-sell-grid">
-          <div class="form-group">
-            <label for="autoBuyTargetPrice">목표 매수가</label>
-            <input id="autoBuyTargetPrice" type="number" min="1" step="1" placeholder="예: 48000" />
-          </div>
-          <div class="form-group">
-            <label for="autoBuyQty">수량</label>
-            <input id="autoBuyQty" type="number" min="1" step="1" value="1" />
-          </div>
-          <div class="form-group">
-            <label for="autoBuyBudget">예산 제한</label>
-            <input id="autoBuyBudget" type="number" min="0" step="1" placeholder="비워두면 제한 없음" />
-          </div>
-          <div class="checkbox-group">
-            <label class="checkbox-label">
-              <input id="autoBuyMax" type="checkbox" />
-              <span>가능한 최대 수량으로 사기</span>
-            </label>
-          </div>
-        </div>
-        <button class="auto-sell-add-btn" id="addAutoBuyBtn" type="button">자동매수 등록</button>
-        <div class="auto-sell-list-wrap">
-          <div class="auto-sell-list-head">등록된 자동매수</div>
-          <div class="auto-sell-list" id="autoBuyList"></div>
-        </div>
-      </div>
-    `;
-    autoSellBlock.replaceWith(autoBuy);
-  }
-
-  if (!byId("adminOverlay")) {
-    const overlay = document.createElement("div");
-    overlay.id = "adminOverlay";
-    overlay.className = "hidden";
-    overlay.innerHTML = `
-      <div id="adminModal" style="width:min(980px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;border-radius:24px;padding:20px;background:linear-gradient(180deg,rgba(14,25,50,.98),rgba(8,17,34,.98));border:1px solid rgba(255,255,255,.1);box-shadow:0 24px 60px rgba(0,0,0,.45);color:#f5f8ff">
-        <div class="admin-head">
-          <h3>관리자 모드</h3>
-          <button id="closeAdminModalBtn" type="button">닫기</button>
-        </div>
-
-        <div id="adminLoginBox" class="admin-block">
-          <div class="admin-note">관리자 코드를 입력하면 고속 배속과 세부 제어를 열 수 있어요</div>
-          <div class="admin-row">
-            <input id="adminCodeInput" type="password" placeholder="관리자 코드 입력">
-            <button id="adminLoginBtn" type="button">입장</button>
-          </div>
-        </div>
-
-        <div id="adminPanelBox" class="admin-block hidden" style="margin-top:14px">
-          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px">
-            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">초기 자산<input id="adminInitialCash" type="number" min="1000" step="1000" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
-            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">긴급지원금<input id="adminSupportAmount" type="number" min="0" step="1000" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
-            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">지원 가능 현금 기준<input id="adminSupportLimit" type="number" min="0" step="1000" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
-
-            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">수수료율<input id="adminFeeRate" type="number" min="0" step="0.0001" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
-            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">변동성<input id="adminVolatility" type="number" min="0.2" step="0.1" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
-            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">뉴스 빈도<input id="adminNewsFreq" type="number" min="0.2" step="0.1" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
-
-            <label class="checkbox-label"><input id="adminHighSpeedEnabled" type="checkbox"><span>100x / 200x / 300x 활성화</span></label>
-            <label class="checkbox-label"><input id="adminDailyLimitEnabled" type="checkbox"><span>상한/하한 활성화</span></label>
-            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">상한율<input id="adminUpperLimitRate" type="number" min="0.05" step="0.01" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
-
-            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">하한율<input id="adminLowerLimitRate" type="number" min="0.05" step="0.01" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
-            <button id="saveAdminSettingsBtn" type="button" class="top-action-btn control-btn">설정 반영</button>
-            <button id="forceBaselineResetBtn" type="button" class="top-action-btn control-btn">수익률 기준 리셋</button>
-
-            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">종목 선택<select id="adminStockSelect" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></select></label>
-            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">현재가 수정<input id="adminStockPrice" type="number" min="1" step="1" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
-            <button id="applyAdminStockPriceBtn" type="button" class="top-action-btn control-btn">가격 반영</button>
-
-            <button id="adminCancelAllAutoSellBtn" type="button" class="top-action-btn control-btn">예약판매 전체 취소</button>
-            <button id="adminCancelAllAutoBuyBtn" type="button" class="top-action-btn control-btn">자동구매 전체 취소</button>
-            <button id="adminResetAllBtn" type="button" class="top-action-btn control-btn danger-btn">전체 데이터 초기화</button>
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-  }
-
-  if (!byId("flashStyleAddon")) {
-    const style = document.createElement("style");
-    style.id = "flashStyleAddon";
-    style.textContent = `
-      .price-flash-up{animation:priceUp .55s ease}
-      .price-flash-down{animation:priceDown .55s ease}
-      @keyframes priceUp{0%{text-shadow:0 0 0 rgba(0,0,0,0)}50%{text-shadow:0 0 18px rgba(255,95,130,.65)}100%{text-shadow:0 0 0 rgba(0,0,0,0)}}
-      @keyframes priceDown{0%{text-shadow:0 0 0 rgba(0,0,0,0)}50%{text-shadow:0 0 18px rgba(103,194,255,.65)}100%{text-shadow:0 0 0 rgba(0,0,0,0)}}
-      #adminOverlay{position:fixed;inset:0;background:rgba(2,8,20,.72);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;z-index:9999}
-      #adminOverlay.hidden{display:none}
-      #adminModal{width:min(980px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;border-radius:24px;padding:20px;background:linear-gradient(180deg,rgba(14,25,50,.98),rgba(8,17,34,.98));border:1px solid rgba(255,255,255,.1);box-shadow:0 24px 60px rgba(0,0,0,.45);color:#f5f8ff}
-      .admin-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}.admin-head h3{margin:0}
-      .admin-head button,.admin-row button,.admin-grid button{border:none;border-radius:14px;padding:12px 14px;background:rgba(255,255,255,.08);color:#fff;font-weight:800;cursor:pointer}
-      .admin-row button.danger,#adminResetAllBtn{background:rgba(255,95,130,.14);color:#ffc2d0}
-      .admin-block{padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:18px;background:rgba(255,255,255,.03)}
-      .admin-block.hidden{display:none}.admin-note{color:#93a4c9;margin-bottom:12px}
-      .admin-row{display:flex;gap:10px;align-items:center}.admin-row.wrap{flex-wrap:wrap;margin-top:12px}
-      .admin-row input,.admin-grid input,.admin-grid select,.admin-row select{background:#081224;color:#fff;border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px 14px;min-height:46px}
-      .admin-row input{flex:1}.admin-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.admin-grid.slim{grid-template-columns:1.4fr 1fr auto;align-items:end;margin-top:12px}
-      .admin-grid label{display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px}
-      .header-actions .top-action-btn.active-admin{background:linear-gradient(135deg,#2f71ff,#67c2ff);border-color:transparent;box-shadow:0 12px 28px rgba(58,126,255,.22)}
-      .micro-tag{display:inline-flex;align-items:center;gap:4px;padding:5px 8px;border-radius:999px;font-size:11px;font-weight:800;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:#cfe1ff}
-      .micro-tag.up{color:#79f0ae;background:rgba(78,225,143,.08)} .micro-tag.down{color:#ffb0bf;background:rgba(255,95,130,.08)}
-      .history-pnl{color:#93a4c9;font-size:12px;margin-top:4px}.hidden{display:none!important}
-      @media (max-width: 860px){.admin-grid,.admin-grid.slim{grid-template-columns:1fr}.admin-row{flex-wrap:wrap}}
-    `;
-    document.head.appendChild(style);
-  }
-
-  collectEls();
+function removeAutoSell(id) {
+  state.autoSellOrders = state.autoSellOrders.filter(x => x.id !== id);
+  queueSave();
+  renderAutoLists();
 }
 
-function renderHeader() {
-  const total = totalAsset();
-  const totalProfit = baselineProfit();
-  const totalRate = baselineProfitRate();
-  if (els.totalAssetTop) {
-    els.totalAssetTop.innerHTML = `<div>${formatKRW(total)}</div><div class="summary-sub ${totalProfit >= 0 ? "up" : "down"}">${formatSignedKRW(totalProfit)} · ${formatSignedPct(totalRate)}</div>`;
+function cancelAllAutoOrders() {
+  if (state.orderMode === "buy") state.autoBuyOrders = [];
+  else state.autoSellOrders = [];
+  queueSave();
+  renderAutoLists();
+  toast("현재 모드의 자동주문을 모두 비웠어요", "event");
+}
+
+function toggleFavorite(code) {
+  const idx = state.favorites.indexOf(code);
+  if (idx >= 0) state.favorites.splice(idx, 1);
+  else state.favorites.unshift(code);
+  state.favorites = state.favorites.slice(0, 30);
+  queueSave();
+  renderWatchlists();
+  renderHero();
+}
+
+function currentSearch() {
+  return (els.searchInput?.value || "").trim().toLowerCase();
+}
+
+function filteredStocks() {
+  const keyword = currentSearch();
+  let list = state.stocks.slice();
+
+  if (keyword) {
+    list = list.filter(stock =>
+      stock.name.toLowerCase().includes(keyword) ||
+      stock.code.toLowerCase().includes(keyword) ||
+      stock.theme.toLowerCase().includes(keyword)
+    );
   }
-  if (els.profitLossTop) {
-    els.profitLossTop.innerHTML = `<div>${formatSignedKRW(totalProfit)}</div><div class="summary-sub ${totalProfit >= 0 ? "up" : "down"}">${formatSignedPct(totalRate)}</div>`;
+
+  if (state.sortBy === "volume") {
+    list.sort((a, b) => b.volume - a.volume);
+  } else {
+    list.sort((a, b) => stockRate(b) - stockRate(a));
   }
-  if (els.cashTop) {
-    els.cashTop.innerHTML = `<div>${formatKRW(state.portfolio.cash)}</div><div class="summary-sub">주문가능</div>`;
-  }
-  if (els.supportFundBtn) {
-    els.supportFundBtn.textContent = `긴급지원금 +${Math.round(state.settings.supportFundAmount / 10000).toLocaleString("ko-KR")}만원`;
-  }
-  setText(els.alertBadge, String(state.alerts.length));
-  setText(els.marketAlertBadge, String(state.news.length));
-  if (els.adminEntryBtn) {
-    els.adminEntryBtn.classList.toggle("active-admin", state.isAdmin);
-    els.adminEntryBtn.textContent = state.isAdmin ? "관리자 ON" : "관리자";
-  }
+  return list;
 }
 
 function renderHero() {
@@ -1086,885 +999,1113 @@ function renderHero() {
   setText(els.selectedName, stock.name);
   setText(els.selectedCode, `${stock.code} · ${stock.theme}`);
   setText(els.selectedPrice, formatKRW(stock.currentPrice));
-  setText(els.selectedChange, `${formatSignedKRW(stockDiff(stock))} (${formatSignedPct(stockRate(stock))})`);
+
+  const diff = stockDiff(stock);
+  const rate = stockRate(stock);
+  if (els.selectedChange) {
+    els.selectedChange.textContent = `${formatSignedKRW(diff)} (${formatSignedPct(rate)})`;
+    els.selectedChange.classList.remove("positive", "negative");
+    els.selectedChange.classList.add(diff >= 0 ? "positive" : "negative");
+  }
+
+  setText(els.dayOpen, formatKRW(stock.openPrice));
   setText(els.dayHigh, formatKRW(stock.dayHigh));
   setText(els.dayLow, formatKRW(stock.dayLow));
-  setText(els.dayOpen, formatKRW(stock.openPrice));
   setText(els.dayVolume, formatVolume(stock.volume));
 
-  if (els.selectedPrice) {
-    els.selectedPrice.classList.remove("up", "down", "price-flash-up", "price-flash-down");
-    els.selectedPrice.classList.add(stockDiff(stock) >= 0 ? "up" : "down");
-    if (stock.flash === 1) els.selectedPrice.classList.add("price-flash-up");
-    if (stock.flash === -1) els.selectedPrice.classList.add("price-flash-down");
+  if (els.heroStockSelect && els.heroStockSelect.value !== stock.code) {
+    els.heroStockSelect.value = stock.code;
   }
-  if (els.selectedChange) {
-    els.selectedChange.classList.remove("up", "down");
-    els.selectedChange.classList.add(stockDiff(stock) >= 0 ? "up" : "down");
-  }
-
-  const mood = state.stocks.reduce((sum, s) => sum + Math.sign(stockRate(s)), 0);
-  const moodPct = clamp(((mood + state.stocks.length) / (state.stocks.length * 2)) * 100, 0, 100);
-  if (els.moodFill) els.moodFill.style.width = `${moodPct}%`;
-  setText(
-    els.moodText,
-    mood >= 10 ? "지금은 매수 심리가 꽤 강한 분위기예요" :
-    mood >= 3 ? "전체적으로 살짝 강한 흐름이에요" :
-    mood > -3 ? "지금은 중립적인 분위기예요" :
-    mood > -10 ? "조금 조심스러운 흐름이에요" :
-    "매도 압력이 제법 강한 장이에요"
-  );
 
   if (els.favoriteToggleBtn) {
     els.favoriteToggleBtn.textContent = state.favorites.includes(stock.code) ? "★" : "☆";
   }
-  if (els.heroStockSelect) {
-    els.heroStockSelect.innerHTML = state.stocks.map(s => `<option value="${s.code}">${s.name} · ${s.theme}</option>`).join("");
-    els.heroStockSelect.value = stock.code;
-  }
-  const clockCard = byId("virtualClockChip");
-  if (clockCard) {
-    const value = q(".summary-value", clockCard);
-    if (value) value.textContent = formatVirtualDateTime();
-  }
-}
 
-function renderPortfolio() {
-  const unrealized = unrealizedProfit();
-  const total = totalAsset();
-  const pnl = baselineProfit();
-  const rate = baselineProfitRate();
+  const moodScore = clamp(
+    ((stockRate(stock) / 20) * 50) + 50 + (stock.eventBias * 40),
+    0,
+    100
+  );
+  if (els.moodFill) els.moodFill.style.width = `${moodScore}%`;
 
-  setText(els.portfolioTotal, formatKRW(total));
-  setText(els.portfolioPL, `${formatSignedKRW(pnl)} (${formatSignedPct(rate)})`);
-  if (els.portfolioPL) {
-    els.portfolioPL.classList.remove("up", "down");
-    els.portfolioPL.classList.add(pnl >= 0 ? "up" : "down");
-  }
+  let moodText = "지금은 중립적인 분위기예요";
+  if (moodScore >= 75) moodText = "매수 심리가 강하고 속도가 붙는 분위기예요";
+  else if (moodScore >= 60) moodText = "우상향 기대감이 조금 더 강해 보여요";
+  else if (moodScore <= 25) moodText = "매도 압력이 강해서 흔들림이 큰 구간이에요";
+  else if (moodScore <= 40) moodText = "조심스럽게 눌리는 흐름이 이어지고 있어요";
+  setText(els.moodText, moodText);
 
-  setText(els.portfolioCash, formatKRW(state.portfolio.cash));
-  setText(els.portfolioStockValue, formatKRW(stockValue()));
-  setText(els.portfolioInvested, formatKRW(investedAmount()));
-  setText(els.portfolioRate, formatSignedPct(rate));
-  setText(byId("portfolioAbsoluteRate"), formatSignedPct(absoluteProfitRate()));
-  setText(byId("portfolioRealized"), formatSignedKRW(state.realizedProfit));
-  setText(byId("portfolioBaselineRate"), formatSignedPct(rate));
-  setText(byId("portfolioUnrealized"), formatSignedKRW(unrealized));
-}
-
-function renderOrderbook() {
-  const stock = selectedStock();
-  if (!stock || !els.orderbookRows) return;
-
-  const asks = stock.orderbook.filter(x => x.type === "ask").sort((a, b) => b.price - a.price);
-  const bids = stock.orderbook.filter(x => x.type === "bid").sort((a, b) => a.price - b.price);
-  const maxQty = Math.max(1, ...stock.orderbook.map(x => x.qty));
-
-  const rows = [];
-  for (let i = 0; i < 8; i++) {
-    const ask = asks[i] || asks[asks.length - 1];
-    const bid = bids[i] || bids[bids.length - 1];
-    const showPrice = i === 7 ? stock.currentPrice : ask.price;
-    rows.push(`
-      <div class="orderbook-row">
-        <div class="ask-cell">
-          <span class="bar red" style="width:${(ask.qty / maxQty) * 100}%"></span>
-          <b>${ask.qty.toLocaleString("ko-KR")}</b>
-        </div>
-        <div class="price-cell ${showPrice >= stock.prevClose ? "sell-color" : "buy-color"}">${formatKRW(showPrice)}</div>
-        <div class="bid-cell">
-          <span class="bar blue" style="width:${(bid.qty / maxQty) * 100}%"></span>
-          <b>${bid.qty.toLocaleString("ko-KR")}</b>
-        </div>
-      </div>
-    `);
-  }
-  els.orderbookRows.innerHTML = rows.join("");
-}
-
-function renderSelectedNews() {
-  const stock = selectedStock();
-  const items = state.news.filter(x => x.code === stock.code).slice(0, 8);
-  setText(els.selectedNewsTitleName, stock.name);
-  setText(els.selectedNewsCount, `${items.length}건`);
-
-  if (!els.selectedNewsFeed) return;
-  if (!items.length) {
-    els.selectedNewsFeed.innerHTML = `<div class="empty-state-box">아직 ${stock.name} 관련 뉴스가 없어요</div>`;
-    return;
-  }
-
-  els.selectedNewsFeed.innerHTML = items.map(item => `
-    <div class="news-item ${item.impact >= 0 ? "up" : "down"}">
-      <div class="news-top"><b>${typeLabel(item.type)}</b><span>${item.time}</span></div>
-      <div class="news-text">${item.text}</div>
-    </div>
-  `).join("");
-}
-
-function renderNewsFeed() {
-  setText(els.newsCountChip, `${state.news.length}건`);
-  if (!els.newsFeed) return;
-
-  if (!state.news.length) {
-    els.newsFeed.innerHTML = `<div class="empty-state-box">아직 뉴스가 없어요</div>`;
-    return;
-  }
-
-  els.newsFeed.innerHTML = state.news.slice(0, 20).map(item => `
-    <div class="news-item ${item.impact >= 0 ? "up" : "down"}">
-      <div class="news-top"><b>${item.name}</b><span>${item.time} · ${typeLabel(item.type)}</span></div>
-      <div class="news-text">${item.text}</div>
-      <div class="news-time"><span class="micro-tag ${item.impact >= 0 ? "up" : "down"}">${item.theme}</span></div>
-    </div>
-  `).join("");
-}
-
-function renderHistory() {
-  qa(".history-tab").forEach(btn => btn.classList.toggle("active", btn.dataset.historyTab === state.historyTab));
-  if (els.orderHistoryList) els.orderHistoryList.classList.toggle("hidden", state.historyTab !== "orders");
-  if (els.alertHistoryList) els.alertHistoryList.classList.toggle("hidden", state.historyTab !== "alerts");
-
-  if (els.orderHistoryList) {
-    if (!state.orderHistory.length) {
-      els.orderHistoryList.innerHTML = `<div class="empty-state-box">아직 주문 기록이 없어요</div>`;
-    } else {
-      els.orderHistoryList.innerHTML = state.orderHistory.slice(0, 30).map(item => `
-        <div class="news-item ${item.type === "sell" ? "down" : "up"}">
-          <div class="news-top"><b>${item.stockName}</b><span>${item.time} · ${item.type === "buy" ? "매수" : "매도"}</span></div>
-          <div class="news-text">${formatKRW(item.price)} · ${item.qty.toLocaleString("ko-KR")}주 · 수수료 ${formatKRW(item.fee)}</div>
-        </div>
-      `).join("");
-    }
-  }
-
-  if (els.alertHistoryList) {
-    if (!state.alerts.length) {
-      els.alertHistoryList.innerHTML = `<div class="empty-state-box">아직 알림이 없어요</div>`;
-    } else {
-      els.alertHistoryList.innerHTML = state.alerts.slice(0, 40).map(item => `
-        <div class="news-item ${item.tone === "up" ? "up" : item.tone === "down" ? "down" : ""}">
-          <div class="news-top"><b>${item.time}</b></div>
-          <div class="news-text">${item.text}</div>
-        </div>
-      `).join("");
-    }
-  }
-}
-
-function renderWatchItem(stock) {
-  const rate = stockRate(stock);
-  const liked = state.favorites.includes(stock.code);
-  return `
-    <div class="watch-item watch-item-glow ${stock.code === state.selectedCode ? "active" : ""}" data-select-code="${stock.code}">
-      <div class="watch-left">
-        <div class="stock-logo small">${stock.logo}</div>
-        <div>
-          <div class="watch-name">${stock.name}</div>
-          <div class="watch-sub">${stock.theme} · 시총감 ${randInt(1500, 980000).toLocaleString("ko-KR")}억</div>
-        </div>
-      </div>
-      <div class="watch-right">
-        <button class="favorite-toggle" data-toggle-favorite="${stock.code}" type="button">${liked ? "★" : "☆"}</button>
-        <div class="watch-price">${formatKRW(stock.currentPrice)}</div>
-        <div class="watch-rate ${rate >= 0 ? "up" : "down"}">${formatSignedPct(rate)}</div>
-        <div class="watch-sub">거래량 ${formatVolume(stock.volume)}</div>
-      </div>
-    </div>
-  `;
-}
-
-function renderWatchlist() {
-  const term = (els.searchInput?.value || "").trim().toLowerCase();
-  let items = [...state.stocks];
-
-  if (term) {
-    items = items.filter(s =>
-      s.name.toLowerCase().includes(term) ||
-      s.code.toLowerCase().includes(term) ||
-      s.theme.toLowerCase().includes(term)
-    );
-  }
-
-  items.sort((a,b) => state.sortBy === "volume" ? b.volume - a.volume : stockRate(b) - stockRate(a));
-
-  const favs = items.filter(s => state.favorites.includes(s.code));
-
-  if (els.favoritesList) {
-    if (!favs.length) els.favoritesList.innerHTML = "즐겨찾기한 종목이 아직 없어요";
-    else els.favoritesList.innerHTML = favs.map(renderWatchItem).join("");
-  }
-  if (els.watchlist) els.watchlist.innerHTML = items.map(renderWatchItem).join("");
-
-  qa("[data-select-code]").forEach(el => {
-    el.addEventListener("click", () => {
-      state.selectedCode = el.dataset.selectCode;
-      updateOrderInputs();
-      render(true);
-      queueSave();
-    });
-  });
-
-  qa("[data-toggle-favorite]").forEach(el => {
-    el.addEventListener("click", ev => {
-      ev.stopPropagation();
-      const code = el.dataset.toggleFavorite;
-      if (state.favorites.includes(code)) state.favorites = state.favorites.filter(x => x !== code);
-      else state.favorites.unshift(code);
-      renderWatchlist();
-      renderHero();
-      queueSave();
-    });
-  });
-}
-
-function renderQuickButtons() {
-  if (!els.quickRow) return;
-  const stock = selectedStock();
-  const cash = state.portfolio.cash;
-  const h = holdingOf(stock.code);
-  const maxBuy = Math.max(0, Math.floor(cash / (stock.currentPrice * (1 + state.settings.feeRate))));
-  const sellAll = h.qty;
-
-  const buttons = state.orderMode === "buy"
-    ? [Math.max(1, Math.floor(maxBuy*0.1)), Math.max(1, Math.floor(maxBuy*0.25)), Math.max(1, Math.floor(maxBuy*0.5)), Math.max(1, Math.floor(maxBuy*0.75)), maxBuy].filter((v,i,a)=>v>0&&a.indexOf(v)===i)
-    : [Math.max(1, Math.floor(sellAll*0.1)), Math.max(1, Math.floor(sellAll*0.25)), Math.max(1, Math.floor(sellAll*0.5)), Math.max(1, Math.floor(sellAll*0.75)), sellAll].filter((v,i,a)=>v>0&&a.indexOf(v)===i);
-
-  els.quickRow.innerHTML = buttons.map(v => `<button type="button" class="ghost-btn" data-quick-qty="${v}">${state.orderMode === "buy" && v === maxBuy ? "100%" : state.orderMode === "sell" && v === sellAll ? "100%" : `${Math.round((v / Math.max(1, state.orderMode === "buy" ? maxBuy : sellAll)) * 100)}%`}</button>`).join("");
-
-  qa("[data-quick-qty]", els.quickRow).forEach(btn => btn.addEventListener("click", () => {
-    if (els.orderQty) els.orderQty.value = btn.dataset.quickQty;
-    updateOrderInputs();
-  }));
+  renderOrderPanel();
+  renderSelectedNews();
+  renderOrderbook();
 }
 
 function renderSpeedButtons() {
-  const wrap = els.speedButtons;
-  if (!wrap) return;
-  const wanted = [1,2,5,10,20,50].concat(state.settings.adminHighSpeedEnabled ? [100,200,300] : []);
-  wrap.innerHTML = wanted.map(v => `<button type="button" data-speed="${v}" class="${state.speed === v ? "active" : ""}">${v}x</button>`).join("");
-  qa("button", wrap).forEach(btn => btn.addEventListener("click", () => {
-    state.speed = toInt(btn.dataset.speed, 1);
-    renderSpeedButtons();
-    restartTick();
-    queueSave();
-  }));
-}
+  if (!els.speedButtons) return;
+  const speeds = [1, 2, 5, 10, 20, 50];
+  const adminSpeeds = state.isAdmin && state.settings.adminHighSpeedEnabled ? [100, 200, 300] : [];
+  const all = [...speeds, ...adminSpeeds];
 
-function setOrderMode(mode) {
-  state.orderMode = mode === "sell" ? "sell" : "buy";
-  if (els.buyModeBtn) {
-    els.buyModeBtn.classList.toggle("active", state.orderMode === "buy");
-    els.buyModeBtn.classList.toggle("buy", true);
-  }
-  if (els.sellModeBtn) {
-    els.sellModeBtn.classList.toggle("active", state.orderMode === "sell");
-    els.sellModeBtn.classList.toggle("sell", true);
-  }
-  if (els.submitOrderBtn) {
-    els.submitOrderBtn.textContent = state.orderMode === "buy" ? "매수 실행" : "매도 실행";
-    els.submitOrderBtn.classList.toggle("buy", state.orderMode === "buy");
-    els.submitOrderBtn.classList.toggle("sell", state.orderMode === "sell");
-  }
-
-  const autoModeTitle = byId("autoModeTitle");
-  const autoModeDesc = byId("autoModeDesc");
-  const autoSellModeBox = byId("autoSellModeBox");
-  const autoBuyModeBox = byId("autoBuyModeBox");
-
-  if (state.orderMode === "buy") {
-    if (autoModeTitle) autoModeTitle.textContent = "예약구매 · 자동매수";
-    if (autoModeDesc) autoModeDesc.textContent = "원하는 가격까지 내려오면 자동으로 매수할 수 있어요";
-    if (autoSellModeBox) autoSellModeBox.classList.add("hidden");
-    if (autoBuyModeBox) autoBuyModeBox.classList.remove("hidden");
-  } else {
-    if (autoModeTitle) autoModeTitle.textContent = "예약판매 · 자동매도";
-    if (autoModeDesc) autoModeDesc.textContent = "원하는 가격에 도달하면 자동으로 매도할 수 있어요";
-    if (autoSellModeBox) autoSellModeBox.classList.remove("hidden");
-    if (autoBuyModeBox) autoBuyModeBox.classList.add("hidden");
-  }
-
-  renderQuickButtons();
-  updateOrderInputs();
-}
-
-function updateOrderInputs() {
-  const stock = selectedStock();
-  if (!stock) return;
-
-  if (els.orderPrice) {
-    els.orderPrice.value = String(stock.currentPrice);
-    els.orderPrice.readOnly = true;
-  }
-
-  const holding = holdingOf(stock.code);
-  const maxBuyQty = Math.max(0, Math.floor(state.portfolio.cash / (stock.currentPrice * (1 + state.settings.feeRate))));
-  let qty = Math.max(1, toInt(els.orderQty?.value, 1));
-
-  if (state.orderMode === "sell" && holding.qty > 0 && qty > holding.qty) {
-    qty = holding.qty;
-    if (els.orderQty) els.orderQty.value = String(qty);
-  }
-
-  const amount = stock.currentPrice * qty;
-  const fee = feeOf(amount);
-
-  setText(els.holdingQtyInline, formatQty(holding.qty));
-  setText(els.avgPriceInline, formatKRW(holding.avgPrice));
-  setText(els.availableCash, formatKRW(state.portfolio.cash));
-  setText(els.maxBuyQty, formatQty(maxBuyQty));
-  setText(els.currentHoldingQty, formatQty(holding.qty));
-  setText(els.currentAvgPrice, formatKRW(holding.avgPrice));
-  setText(els.currentTradePriceLabel, formatKRW(stock.currentPrice));
-  setText(els.estimatedCost, formatKRW(state.orderMode === "buy" ? amount + fee : Math.max(0, amount - fee)));
-  setText(els.estimatedFee, formatKRW(fee));
-
-  renderQuickButtons();
-}
-
-function submitOrder() {
-  const stock = selectedStock();
-  if (!stock) return;
-  const qty = Math.max(1, toInt(els.orderQty?.value, 1));
-
-  if (state.orderMode === "buy") {
-    if (executeBuy(stock.code, qty, stock.currentPrice, "현재가 매수")) {
-      toast(`${stock.name} ${qty}주 매수 완료`, "up");
-    }
-  } else {
-    if (executeSell(stock.code, qty, stock.currentPrice, "현재가 매도")) {
-      toast(`${stock.name} ${qty}주 매도 완료`, "down");
-    }
-  }
-
-  updateOrderInputs();
-  render(true);
-  queueSave();
-}
-
-function addAutoSellOrder() {
-  const stock = selectedStock();
-  if (!stock) return;
-
-  const targetPrice = Math.max(0, toInt(els.autoSellTargetPrice?.value, 0));
-  const stopPrice = Math.max(0, toInt(els.autoSellStopPrice?.value, 0));
-  const qty = Math.max(1, toInt(els.autoSellQty?.value, 1));
-  const all = !!els.autoSellAll?.checked;
-
-  if (!targetPrice && !stopPrice) {
-    toast("목표가나 손절가 중 하나는 입력해 주세요.", "down");
-    return;
-  }
-
-  state.autoSellOrders.unshift({
-    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    code: stock.code,
-    targetPrice,
-    stopPrice,
-    qty,
-    all
-  });
-  state.autoSellOrders = state.autoSellOrders.slice(0, 120);
-  renderAutoLists();
-  queueSave();
-}
-
-function addAutoBuyOrder() {
-  const stock = selectedStock();
-  if (!stock) return;
-
-  const targetPrice = Math.max(1, toInt(els.autoBuyTargetPrice?.value, 0));
-  const qty = Math.max(1, toInt(els.autoBuyQty?.value, 1));
-  const budgetLimit = Math.max(0, toInt(els.autoBuyBudget?.value, 0));
-  const useMax = !!els.autoBuyMax?.checked;
-
-  if (targetPrice <= 0) {
-    toast("목표 매수가를 입력해 주세요.", "down");
-    return;
-  }
-
-  state.autoBuyOrders.unshift({
-    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    code: stock.code,
-    targetPrice,
-    qty,
-    budgetLimit,
-    useMax
-  });
-  state.autoBuyOrders = state.autoBuyOrders.slice(0, 120);
-  renderAutoLists();
-  queueSave();
-}
-
-function renderAutoLists() {
-  if (els.autoSellList) {
-    if (!state.autoSellOrders.length) {
-      els.autoSellList.innerHTML = `<div class="auto-sell-item"><div class="auto-sell-item-main">등록된 예약판매가 없어요</div></div>`;
-    } else {
-      els.autoSellList.innerHTML = state.autoSellOrders.map(item => {
-        const stock = state.stocks.find(s => s.code === item.code);
-        return `
-          <div class="auto-sell-item">
-            <div class="auto-sell-item-main">
-              <div>${stock?.name || item.code}</div>
-              <div>목표가 ${item.targetPrice ? formatKRW(item.targetPrice) : "-"}</div>
-              <div>손절가 ${item.stopPrice ? formatKRW(item.stopPrice) : "-"}</div>
-              <div>${item.all ? "전량" : formatQty(item.qty)}</div>
-            </div>
-            <button class="ghost-btn" type="button" data-auto-sell-del="${item.id}">삭제</button>
-          </div>
-        `;
-      }).join("");
-    }
-
-    qa("[data-auto-sell-del]", els.autoSellList).forEach(btn => {
-      addEvent(btn, "click", () => {
-        state.autoSellOrders = state.autoSellOrders.filter(x => x.id !== btn.dataset.autoSellDel);
-        renderAutoLists();
-        queueSave();
-      });
+  els.speedButtons.innerHTML = "";
+  all.forEach(spd => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = `${spd}x`;
+    if (state.speed === spd) btn.classList.add("active");
+    btn.addEventListener("click", () => {
+      state.speed = spd;
+      queueSave();
+      renderSpeedButtons();
+      toast(`속도가 ${spd}x로 변경됐어요`, "event");
     });
-  }
+    els.speedButtons.appendChild(btn);
+  });
+}
 
-  if (els.autoBuyList) {
-    if (!state.autoBuyOrders.length) {
-      els.autoBuyList.innerHTML = `<div class="auto-sell-item"><div class="auto-sell-item-main">등록된 자동구매가 없어요</div></div>`;
-    } else {
-      els.autoBuyList.innerHTML = state.autoBuyOrders.map(item => {
-        const stock = state.stocks.find(s => s.code === item.code);
-        return `
-          <div class="auto-sell-item">
-            <div class="auto-sell-item-main">
-              <div>${stock?.name || item.code}</div>
-              <div>목표 매수가 ${formatKRW(item.targetPrice)}</div>
-              <div>${item.useMax ? "가능한 최대 수량" : formatQty(item.qty)}</div>
-              <div>${item.budgetLimit > 0 ? `예산 ${formatKRW(item.budgetLimit)}` : "예산 제한 없음"}</div>
-            </div>
-            <button class="ghost-btn" type="button" data-auto-buy-del="${item.id}">삭제</button>
-          </div>
-        `;
-      }).join("");
-    }
-
-    qa("[data-auto-buy-del]", els.autoBuyList).forEach(btn => {
-      addEvent(btn, "click", () => {
-        state.autoBuyOrders = state.autoBuyOrders.filter(x => x.id !== btn.dataset.autoBuyDel);
-        renderAutoLists();
-        queueSave();
-      });
+function renderChartTabs() {
+  if (!els.chartTabs) return;
+  els.chartTabs.innerHTML = "";
+  CHART_RANGES.forEach(item => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `tab-btn${state.chartRange === item.key ? " active" : ""}`;
+    btn.textContent = item.label;
+    btn.addEventListener("click", () => {
+      state.chartRange = item.key;
+      queueSave();
+      renderChartTabs();
+      renderChart();
     });
-  }
+    els.chartTabs.appendChild(btn);
+  });
 }
 
 function getChartSeries(stock) {
   if (!stock) return [];
-  const short = stock.history || [];
-  const long = stock.historyLong || short;
+  const long = stock.historyLong.slice();
+  const short = stock.history.slice();
 
   if (state.chartRange === "1m") return short.slice(-60);
-  if (state.chartRange === "5m") return short.slice(-100);
-  if (state.chartRange === "1d") return short.slice(-180);
-  if (state.chartRange === "1w") return long.slice(-300);
-  if (state.chartRange === "1y") return long.filter((_, i) => i % 2 === 0).slice(-500);
-  if (state.chartRange === "10y") return long.filter((_, i) => i % 5 === 0).slice(-600);
-  if (state.chartRange === "100y") return long.filter((_, i) => i % 10 === 0).slice(-700);
-  return short.slice(-100);
+  if (state.chartRange === "5m") return short.slice(-180);
+  if (state.chartRange === "1d") return [...long.slice(-160), ...short.slice(-80)].slice(-220);
+  if (state.chartRange === "1w") return long.slice(-350);
+  if (state.chartRange === "1y") return long.slice(-900);
+  if (state.chartRange === "10y") return long.slice(-2000);
+  return long.slice(-3000);
 }
 
 function movingAverage(series, period) {
-  return series.map((_, idx) => {
-    if (idx < period - 1) return null;
-    const slice = series.slice(idx - period + 1, idx + 1);
-    return slice.reduce((a, b) => a + b, 0) / slice.length;
-  });
+  const result = [];
+  let sum = 0;
+  for (let i = 0; i < series.length; i++) {
+    sum += series[i];
+    if (i >= period) sum -= series[i - period];
+    result.push(i >= period - 1 ? sum / period : null);
+  }
+  return result;
 }
 
-function drawLine(ctx, values, xOf, yOf, color, width = 1.5) {
+function sampleSeriesForHighSpeed(series, width) {
+  if (!Array.isArray(series) || !series.length) return [];
+  const maxPoints = Math.max(60, Math.floor(width / 3));
+  if (series.length <= maxPoints) return series.slice();
+
+  const sampled = [];
+  const bucket = series.length / maxPoints;
+  for (let i = 0; i < maxPoints; i++) {
+    const start = Math.floor(i * bucket);
+    const end = Math.min(series.length, Math.floor((i + 1) * bucket));
+    const chunk = series.slice(start, Math.max(start + 1, end));
+    const avg = chunk.reduce((a, b) => a + b, 0) / chunk.length;
+    sampled.push(avg);
+  }
+  return sampled;
+}
+
+function renderChart() {
+  const canvas = els.priceChart;
+  if (!canvas) return;
+  const stock = selectedStock();
+  if (!stock) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = Math.max(300, Math.floor(rect.width || canvas.clientWidth || 1100));
+  const cssHeight = Math.max(300, Math.floor(rect.height || canvas.clientHeight || 620));
+
+  if (canvas.width !== Math.floor(cssWidth * dpr) || canvas.height !== Math.floor(cssHeight * dpr)) {
+    canvas.width = Math.floor(cssWidth * dpr);
+    canvas.height = Math.floor(cssHeight * dpr);
+  }
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const rawSeries = getChartSeries(stock);
+  const series = sampleSeriesForHighSpeed(rawSeries, cssWidth);
+  if (series.length < 2) {
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+    return;
+  }
+
+  const ma5 = movingAverage(series, 5);
+  const ma20 = movingAverage(series, 20);
+  const ma60 = movingAverage(series, 60);
+
+  const pad = { top: 26, right: 24, bottom: 34, left: 66 };
+  const w = cssWidth - pad.left - pad.right;
+  const h = cssHeight - pad.top - pad.bottom;
+
+  const minPrice = Math.min(...series);
+  const maxPrice = Math.max(...series);
+  const spread = Math.max(1, maxPrice - minPrice);
+  const chartMin = minPrice - spread * 0.12;
+  const chartMax = maxPrice + spread * 0.12;
+
+  const xAt = i => pad.left + (i / Math.max(1, series.length - 1)) * w;
+  const yAt = v => pad.top + (1 - (v - chartMin) / Math.max(1, chartMax - chartMin)) * h;
+
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const bg = ctx.createLinearGradient(0, 0, 0, cssHeight);
+  bg.addColorStop(0, "rgba(20,37,76,.35)");
+  bg.addColorStop(1, "rgba(7,15,30,.05)");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+  ctx.strokeStyle = "rgba(255,255,255,.06)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = pad.top + (h / 5) * i;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(cssWidth - pad.right, y);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "rgba(181,199,235,.78)";
+  ctx.font = '12px "Segoe UI","Noto Sans KR",sans-serif';
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (let i = 0; i <= 5; i++) {
+    const v = chartMax - ((chartMax - chartMin) / 5) * i;
+    const y = pad.top + (h / 5) * i;
+    ctx.fillText(formatKRW(v), pad.left - 10, y);
+  }
+
+  const isUp = series[series.length - 1] >= series[0];
+  const lineColor = isUp ? "#ff6d92" : "#6ac7ff";
+  const fillColor = isUp ? "rgba(255,109,146,.16)" : "rgba(106,199,255,.16)";
+
+  ctx.beginPath();
+  series.forEach((v, i) => {
+    const x = xAt(i);
+    const y = yAt(v);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = lineColor;
+  ctx.shadowColor = isUp ? "rgba(255,109,146,.28)" : "rgba(106,199,255,.26)";
+  ctx.shadowBlur = 16;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.lineTo(xAt(series.length - 1), pad.top + h);
+  ctx.lineTo(xAt(0), pad.top + h);
+  ctx.closePath();
+  ctx.fillStyle = fillColor;
+  ctx.fill();
+
+  drawMaLine(ctx, ma5, xAt, yAt, "#ff8caf");
+  drawMaLine(ctx, ma20, xAt, yAt, "#f2c86a");
+  drawMaLine(ctx, ma60, xAt, yAt, "#9f82ff");
+
+  const lastX = xAt(series.length - 1);
+  const lastY = yAt(series[series.length - 1]);
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 5.5, 0, Math.PI * 2);
+  ctx.fillStyle = lineColor;
+  ctx.fill();
+
+  canvas._chartMeta = {
+    series,
+    xAt,
+    yAt,
+    pad,
+    cssWidth,
+    cssHeight
+  };
+}
+
+function drawMaLine(ctx, series, xAt, yAt, color) {
   ctx.beginPath();
   let started = false;
-  values.forEach((v, i) => {
-    if (v == null) return;
-    const x = xOf(i);
-    const y = yOf(v);
+  for (let i = 0; i < series.length; i++) {
+    const v = series[i];
+    if (v == null) continue;
+    const x = xAt(i);
+    const y = yAt(v);
     if (!started) {
       ctx.moveTo(x, y);
       started = true;
     } else {
       ctx.lineTo(x, y);
     }
-  });
+  }
   ctx.strokeStyle = color;
-  ctx.lineWidth = width;
+  ctx.lineWidth = 1.8;
   ctx.stroke();
 }
+function bindChartHover() {
+  if (!els.priceChart) return;
 
-function drawChart() {
-  const canvas = els.priceChart;
-  if (!canvas || !canvas.getContext) return;
-  const stock = selectedStock();
-  if (!stock) return;
+  const showTip = e => {
+    const meta = els.priceChart._chartMeta;
+    if (!meta || !els.chartTooltip) return;
 
-  const ctx = canvas.getContext("2d");
-  const ratio = window.devicePixelRatio || 1;
-  const width = canvas.clientWidth || 900;
-  const height = 720;
-  canvas.width = Math.round(width * ratio);
-  canvas.height = Math.round(height * ratio);
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-
-  const series = getChartSeries(stock);
-  if (!series.length) return;
-
-  const ma5 = movingAverage(series, 5);
-  const ma20 = movingAverage(series, 20);
-  const ma60 = movingAverage(series, 60);
-
-  ctx.clearRect(0, 0, width, height);
-
-  const padding = { top: 42, right: 36, bottom: 52, left: 52 };
-  const w = width - padding.left - padding.right;
-  const h = height - padding.top - padding.bottom;
-  const min = Math.min(...series) * 0.98;
-  const max = Math.max(...series) * 1.02;
-  const xOf = i => padding.left + (i / Math.max(1, series.length - 1)) * w;
-  const yOf = v => padding.top + (1 - (v - min) / (max - min || 1)) * h;
-
-  ctx.strokeStyle = "rgba(255,255,255,.06)";
-  ctx.lineWidth = 1;
-  for (let i = 0; i < 4; i++) {
-    const y = padding.top + (h / 3) * i;
-    ctx.beginPath();
-    ctx.moveTo(padding.left, y);
-    ctx.lineTo(padding.left + w, y);
-    ctx.stroke();
-  }
-  for (let i = 0; i < 4; i++) {
-    const x = padding.left + (w / 3) * i;
-    ctx.beginPath();
-    ctx.moveTo(x, padding.top);
-    ctx.lineTo(x, padding.top + h);
-    ctx.stroke();
-  }
-
-  const up = stockRate(stock) >= 0;
-  const grad = ctx.createLinearGradient(0, padding.top, 0, padding.top + h);
-  grad.addColorStop(0, up ? "rgba(255,95,130,.18)" : "rgba(103,194,255,.18)");
-  grad.addColorStop(1, "rgba(255,255,255,0)");
-
-  ctx.beginPath();
-  series.forEach((v, i) => {
-    const x = xOf(i);
-    const y = yOf(v);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.lineTo(xOf(series.length - 1), padding.top + h);
-  ctx.lineTo(xOf(0), padding.top + h);
-  ctx.closePath();
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  drawLine(ctx, series, xOf, yOf, up ? "#ff6b89" : "#67c2ff", 2.2);
-  drawLine(ctx, ma5, xOf, yOf, "#ff84a1", 1);
-  drawLine(ctx, ma20, xOf, yOf, "#ffc94d", 1);
-  drawLine(ctx, ma60, xOf, yOf, "#8e7dff", 1);
-
-  ctx.fillStyle = "rgba(255,255,255,.65)";
-  ctx.font = "12px Segoe UI, Apple SD Gothic Neo, Malgun Gothic, sans-serif";
-  ctx.fillText(stock.name, padding.left, 22);
-  ctx.fillText(`${formatSignedPct(stockRate(stock))} · 시가 ${formatKRW(stock.openPrice)} · 가상 ${formatVirtualDateTime()}`, padding.left, height - 14);
-
-  bindChartTooltip(series, xOf, yOf, stock, width, height);
-}
-
-function bindChartTooltip(series, xOf, yOf, stock, width, height) {
-  const canvas = els.priceChart;
-  const tooltip = els.chartTooltip;
-  if (!canvas || !tooltip || !series.length) return;
-
-  canvas.onmousemove = e => {
-    const rect = canvas.getBoundingClientRect();
+    const rect = els.priceChart.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const rel = clamp(x / rect.width, 0, 1);
-    const idx = Math.round(rel * (series.length - 1));
-    const price = series[idx];
-    const base = series[0];
-    const pct = base > 0 ? ((price - base) / base) * 100 : 0;
-    const volHint = Math.round((stock.volume / series.length) * (0.6 + idx / series.length));
+    const idx = Math.round(((x - meta.pad.left) / Math.max(1, meta.cssWidth - meta.pad.left - meta.pad.right)) * (meta.series.length - 1));
+    const safeIdx = clamp(idx, 0, meta.series.length - 1);
+    const price = meta.series[safeIdx];
+    const rate = meta.series[0] > 0 ? ((price - meta.series[0]) / meta.series[0]) * 100 : 0;
 
-    tooltip.classList.remove("hidden");
-    tooltip.innerHTML = `
-      <div><b>${stock.name}</b></div>
-      <div>시점 가격: ${formatKRW(price)}</div>
-      <div class="${pct >= 0 ? "up" : "down"}">등락률: ${formatSignedPct(pct)}</div>
-      <div>거래량 느낌: ${formatVolume(volHint)}</div>
-      <div>인덱스: ${idx + 1} / ${series.length}</div>
-      <div>가상시간: ${formatVirtualDateTime()}</div>
+    els.chartTooltip.classList.remove("hidden");
+    els.chartTooltip.style.left = `${clamp(x + 14, 8, rect.width - 210)}px`;
+    els.chartTooltip.style.top = `${clamp((e.clientY - rect.top) - 12, 8, rect.height - 100)}px`;
+    els.chartTooltip.innerHTML = `
+      <div style="font-weight:900;font-size:13px;margin-bottom:4px;">${selectedStock()?.name || ""}</div>
+      <div>가격 <b>${formatKRW(price)}</b></div>
+      <div>변동률 <b class="${rate >= 0 ? "positive" : "negative"}">${formatSignedPct(rate)}</b></div>
+      <div style="margin-top:4px;color:#9fb2d8;">구간 ${safeIdx + 1} / ${meta.series.length}</div>
     `;
-
-    const left = clamp(xOf(idx) + 14, 8, width - 220);
-    const top = clamp(yOf(price) - 98, 8, height - 150);
-    tooltip.style.left = `${left}px`;
-    tooltip.style.top = `${top}px`;
   };
 
-  canvas.onmouseleave = () => {
-    tooltip.classList.add("hidden");
-  };
+  els.priceChart.addEventListener("mousemove", showTip);
+  els.priceChart.addEventListener("mouseleave", () => {
+    if (els.chartTooltip) els.chartTooltip.classList.add("hidden");
+  });
 }
 
-function renderAdminPanel() {
-  if (!state.isAdmin) return;
-  if (els.adminInitialCash) els.adminInitialCash.value = state.settings.initialCash;
-  if (els.adminSupportAmount) els.adminSupportAmount.value = state.settings.supportFundAmount;
-  if (els.adminSupportLimit) els.adminSupportLimit.value = state.settings.supportFundCashLimit;
-  if (els.adminFeeRate) els.adminFeeRate.value = state.settings.feeRate;
-  if (els.adminVolatility) els.adminVolatility.value = state.settings.globalVolatility;
-  if (els.adminNewsFreq) els.adminNewsFreq.value = state.settings.newsFrequency;
-  if (els.adminHighSpeedEnabled) els.adminHighSpeedEnabled.checked = !!state.settings.adminHighSpeedEnabled;
-  if (els.adminDailyLimitEnabled) els.adminDailyLimitEnabled.checked = !!state.settings.dailyLimitEnabled;
-  if (els.adminUpperLimitRate) els.adminUpperLimitRate.value = state.settings.upperLimitRate;
-  if (els.adminLowerLimitRate) els.adminLowerLimitRate.value = state.settings.lowerLimitRate;
+function renderSelectedNews() {
+  const stock = selectedStock();
+  const list = (state.news || []).filter(n => n.code === stock?.code).slice(0, 18);
 
-  if (els.adminStockSelect) {
-    els.adminStockSelect.innerHTML = state.stocks.map(s => `<option value="${s.code}">${s.name}</option>`).join("");
-    els.adminStockSelect.value = state.selectedCode;
-  }
-  if (els.adminStockPrice) {
-    const s = selectedStock();
-    els.adminStockPrice.value = s ? s.currentPrice : "";
-  }
-}
+  setText(els.selectedNewsTitleName, stock?.name || "");
+  setText(els.selectedNewsCount, `${list.length}건`);
 
-function render(shouldDrawChart = true) {
-  renderHeader();
-  renderHero();
-  renderPortfolio();
-  renderSpeedButtons();
-  renderQuickButtons();
-  updateOrderInputs();
-  renderOrderbook();
-  if (shouldDrawChart) drawChart();
-  renderSelectedNews();
-  renderNewsFeed();
-  renderHistory();
-  renderWatchlist();
-  renderAutoLists();
-  renderAdminPanel();
-}
+  if (!els.selectedNewsFeed) return;
+  els.selectedNewsFeed.innerHTML = "";
 
-function resetBaseline() {
-  state.baseline = { totalAsset: totalAsset(), startedAt: Date.now() };
-  addAlert("수익률 기준선이 현재 자산 기준으로 다시 잡혔어요", "up");
-  render();
-  queueSave();
-}
-
-function claimSupportFund() {
-  if (state.portfolio.cash > state.settings.supportFundCashLimit) {
-    addAlert(`긴급지원금은 현금이 ${formatKRW(state.settings.supportFundCashLimit)} 이하일 때만 받을 수 있어요`, "down");
-    renderHistory();
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state-box";
+    empty.textContent = "아직 이 종목 관련 뉴스가 없어요";
+    els.selectedNewsFeed.appendChild(empty);
     return;
   }
 
-  state.portfolio.cash += state.settings.supportFundAmount;
-  addAlert(`긴급지원금 ${formatKRW(state.settings.supportFundAmount)}이 지급됐어요`, "up");
-  render();
-  queueSave();
+  list.forEach(item => {
+    els.selectedNewsFeed.appendChild(makeNewsCard(item));
+  });
 }
 
-function hardReset() {
-  if (!confirm("전체 데이터를 초기화할까요?")) return;
-  localStorage.removeItem(STORAGE_KEY);
-  defaultState();
-  render();
+function makeNewsCard(item) {
+  const card = document.createElement("div");
+  card.className = "news-card";
+
+  const top = document.createElement("div");
+  top.className = "news-card-top";
+
+  const badge = document.createElement("span");
+  badge.className = `news-type ${item.type}`;
+  badge.textContent = typeLabel(item.type);
+
+  const time = document.createElement("span");
+  time.className = "news-time";
+  time.textContent = item.time || "";
+
+  top.appendChild(badge);
+  top.appendChild(time);
+
+  const title = document.createElement("div");
+  title.className = "news-title";
+  title.textContent = `${item.name} · ${item.theme}`;
+
+  const sub = document.createElement("div");
+  sub.className = "news-sub";
+  sub.textContent = item.text || "";
+
+  card.appendChild(top);
+  card.appendChild(title);
+  card.appendChild(sub);
+  return card;
+}
+
+function renderNewsFeed() {
+  if (!els.newsFeed) return;
+  const list = state.news.slice(0, 36);
+
+  setText(els.newsCountChip, `${list.length}건`);
+  els.newsFeed.innerHTML = "";
+
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state-box";
+    empty.textContent = "아직 뉴스가 없어요";
+    els.newsFeed.appendChild(empty);
+    return;
+  }
+
+  list.forEach(item => {
+    els.newsFeed.appendChild(makeNewsCard(item));
+  });
+}
+
+function renderHistoryTabs() {
+  qa(".history-tab").forEach(btn => {
+    const tab = btn.dataset.historyTab;
+    btn.classList.toggle("active", tab === state.historyTab);
+  });
+
+  if (els.orderHistoryList) els.orderHistoryList.classList.toggle("hidden", state.historyTab !== "orders");
+  if (els.alertHistoryList) els.alertHistoryList.classList.toggle("hidden", state.historyTab !== "alerts");
+}
+
+function makeOrderHistoryCard(item) {
+  const card = document.createElement("div");
+  card.className = "history-card";
+
+  const top = document.createElement("div");
+  top.className = "history-card-top";
+
+  const badge = document.createElement("span");
+  badge.className = `history-type ${item.side === "buy" ? "buy" : "sell"}`;
+  badge.textContent = `${item.type || (item.side === "buy" ? "매수" : "매도")}`;
+
+  const time = document.createElement("span");
+  time.className = "history-time";
+  time.textContent = item.time || "";
+
+  top.appendChild(badge);
+  top.appendChild(time);
+
+  const main = document.createElement("div");
+  main.className = "history-main";
+  main.textContent = `${item.name} · ${formatQty(item.qty)} · ${formatKRW(item.price)}`;
+
+  const sub = document.createElement("div");
+  sub.className = "history-sub";
+
+  if (item.side === "buy") {
+    sub.innerHTML = `총액 <b>${formatKRW(item.total)}</b> · 수수료 <b>${formatKRW(item.fee)}</b>`;
+  } else {
+    const realized = toNum(item.realized, 0);
+    sub.innerHTML = `수령액 <b>${formatKRW(item.total)}</b> · 실현손익 <b class="${realized >= 0 ? "positive" : "negative"}">${formatSignedKRW(realized)}</b>`;
+  }
+
+  card.appendChild(top);
+  card.appendChild(main);
+  card.appendChild(sub);
+  return card;
+}
+
+function makeAlertCard(item) {
+  const card = document.createElement("div");
+  card.className = "history-card";
+
+  const top = document.createElement("div");
+  top.className = "history-card-top";
+
+  const badge = document.createElement("span");
+  badge.className = "history-type alert";
+  badge.textContent = "알림";
+
+  const time = document.createElement("span");
+  time.className = "history-time";
+  time.textContent = item.time || "";
+
+  top.appendChild(badge);
+  top.appendChild(time);
+
+  const main = document.createElement("div");
+  main.className = "history-main";
+  main.textContent = item.text || "";
+
+  card.appendChild(top);
+  card.appendChild(main);
+  return card;
+}
+
+function renderHistory() {
+  renderHistoryTabs();
+
+  if (els.orderHistoryList) {
+    els.orderHistoryList.innerHTML = "";
+    const orders = state.orderHistory.slice(0, 60);
+    if (!orders.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state-box";
+      empty.textContent = "주문 기록이 아직 없어요";
+      els.orderHistoryList.appendChild(empty);
+    } else {
+      orders.forEach(item => els.orderHistoryList.appendChild(makeOrderHistoryCard(item)));
+    }
+  }
+
+  if (els.alertHistoryList) {
+    els.alertHistoryList.innerHTML = "";
+    const alerts = state.alerts.slice(0, 80);
+    if (!alerts.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state-box";
+      empty.textContent = "알림 기록이 아직 없어요";
+      els.alertHistoryList.appendChild(empty);
+    } else {
+      alerts.forEach(item => els.alertHistoryList.appendChild(makeAlertCard(item)));
+    }
+  }
+
+  if (els.alertBadge) setText(els.alertBadge, `${state.alerts.length}`);
+  if (els.marketAlertBadge) setText(els.marketAlertBadge, `${state.news.filter(n => n.type === "breaking").length}`);
+}
+
+function renderOrderbook() {
+  const stock = selectedStock();
+  if (!stock || !els.orderbookRows) return;
+
+  const asks = [];
+  const bids = [];
+  (stock.orderbook || []).forEach(row => {
+    if (row.type === "ask") asks.push(row);
+    else bids.push(row);
+  });
+
+  const maxRows = Math.max(asks.length, bids.length, 12);
+  els.orderbookRows.innerHTML = "";
+
+  for (let i = 0; i < maxRows; i++) {
+    const ask = asks[i] || { qty: 0, price: stock.currentPrice + (i + 1) };
+    const bid = bids[i] || { qty: 0, price: Math.max(1, stock.currentPrice - (i + 1)) };
+
+    const row = document.createElement("div");
+    row.className = "orderbook-row";
+
+    const askQty = document.createElement("div");
+    askQty.className = "ask-qty";
+    askQty.textContent = ask.qty > 0 ? ask.qty.toLocaleString("ko-KR") : "-";
+
+    const mid = document.createElement("div");
+    mid.className = `mid-price ${ask.price >= stock.prevClose ? "mid-up" : "mid-down"}`;
+    mid.textContent = formatKRW(ask.price);
+
+    const bidQty = document.createElement("div");
+    bidQty.className = "bid-qty";
+    bidQty.textContent = bid.qty > 0 ? bid.qty.toLocaleString("ko-KR") : "-";
+
+    row.appendChild(askQty);
+    row.appendChild(mid);
+    row.appendChild(bidQty);
+    els.orderbookRows.appendChild(row);
+  }
+}
+
+function renderOrderPanel() {
+  const stock = selectedStock();
+  if (!stock) return;
+
+  const holding = holdingOf(stock.code);
+  const maxQty = calculateMaxBuyQty(stock.currentPrice);
+
+  setText(els.availableCash, formatKRW(state.portfolio.cash));
+  setText(els.maxBuyQty, formatQty(maxQty));
+  setText(els.currentHoldingQty, formatQty(holding.qty));
+  setText(els.currentAvgPrice, formatKRW(holding.avgPrice));
+  setText(els.holdingQtyInline, formatQty(holding.qty));
+  setText(els.avgPriceInline, formatKRW(holding.avgPrice));
+  setText(els.currentTradePriceLabel, formatKRW(stock.currentPrice));
+
+  if (els.orderPrice) els.orderPrice.value = String(stock.currentPrice);
+
+  const qty = Math.max(1, toInt(els.orderQty?.value, 1));
+  const gross = qty * stock.currentPrice;
+  const fee = feeOf(gross);
+
+  setText(els.estimatedCost, formatKRW(gross));
+  setText(els.estimatedFee, formatKRW(fee));
+
+  if (els.buyModeBtn) {
+    els.buyModeBtn.classList.toggle("active", state.orderMode === "buy");
+    els.buyModeBtn.classList.toggle("buy", state.orderMode === "buy");
+  }
+  if (els.sellModeBtn) {
+    els.sellModeBtn.classList.toggle("active", state.orderMode === "sell");
+    els.sellModeBtn.classList.toggle("sell", state.orderMode === "sell");
+  }
+
+  if (els.submitOrderBtn) {
+    els.submitOrderBtn.classList.toggle("buy", state.orderMode === "buy");
+    els.submitOrderBtn.classList.toggle("sell", state.orderMode === "sell");
+    els.submitOrderBtn.textContent = state.orderMode === "buy" ? "매수 실행" : "매도 실행";
+  }
+
+  if (els.autoModeTitle) setText(els.autoModeTitle, state.orderMode === "buy" ? "예약구매 · 조건매수" : "예약판매 · 조건매도");
+  if (els.autoModeDesc) setText(els.autoModeDesc, state.orderMode === "buy"
+    ? "원하는 가격까지 내려오면 자동으로 매수할 수 있어요"
+    : "목표가 도달 또는 손절 조건에서 자동으로 판매해요"
+  );
+
+  if (els.autoBuyModeBox) els.autoBuyModeBox.classList.toggle("hidden", state.orderMode !== "buy");
+  if (els.autoSellModeBox) els.autoSellModeBox.classList.toggle("hidden", state.orderMode !== "sell");
+
+  renderAutoLists();
+  renderQuickButtons(stock);
+}
+
+function renderQuickButtons(stock) {
+  if (!els.quickRow) return;
+  els.quickRow.innerHTML = "";
+
+  const buttons = state.orderMode === "buy"
+    ? [
+        { label: "10%", action: () => setBuyQtyByRatio(stock, 0.1) },
+        { label: "25%", action: () => setBuyQtyByRatio(stock, 0.25) },
+        { label: "50%", action: () => setBuyQtyByRatio(stock, 0.5) },
+        { label: "최대", action: () => setBuyQtyByRatio(stock, 1) }
+      ]
+    : [
+        { label: "25%", action: () => setSellQtyByRatio(stock, 0.25) },
+        { label: "50%", action: () => setSellQtyByRatio(stock, 0.5) },
+        { label: "100%", action: () => setSellQtyByRatio(stock, 1) },
+        { label: "전량매도", action: () => setSellQtyByRatio(stock, 1, true) }
+      ];
+
+  buttons.forEach(item => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = item.label;
+    btn.addEventListener("click", item.action);
+    els.quickRow.appendChild(btn);
+  });
+}
+
+function setBuyQtyByRatio(stock, ratio) {
+  const max = calculateMaxBuyQty(stock.currentPrice);
+  const qty = Math.max(1, Math.floor(max * ratio));
+  if (els.orderQty) els.orderQty.value = String(qty);
+  renderOrderPanel();
+}
+
+function setSellQtyByRatio(stock, ratio, all = false) {
+  const holding = holdingOf(stock.code);
+  const qty = all ? holding.qty : Math.max(1, Math.floor(holding.qty * ratio));
+  if (els.orderQty) els.orderQty.value = String(Math.max(1, qty || 1));
+  renderOrderPanel();
+}
+
+function renderAutoLists() {
+  if (els.autoBuyList) {
+    els.autoBuyList.innerHTML = "";
+    const items = state.autoBuyOrders.filter(x => x.code === state.selectedCode).slice(0, 30);
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state-box";
+      empty.textContent = "등록된 예약구매가 없어요";
+      els.autoBuyList.appendChild(empty);
+    } else {
+      items.forEach(item => {
+        const row = document.createElement("div");
+        row.className = "auto-item";
+
+        const main = document.createElement("div");
+        main.className = "auto-item-main";
+
+        const title = document.createElement("div");
+        title.className = "auto-item-title";
+        title.textContent = `${item.name} · ${formatKRW(item.targetPrice)} 이하 매수`;
+
+        const sub = document.createElement("div");
+        sub.className = "auto-item-sub";
+        sub.textContent = `${formatQty(item.qty)} · ${item.useMax ? "최대수량" : (item.budget > 0 ? `예산 ${formatKRW(item.budget)}` : "예산 제한 없음")} · ${item.createdAt}`;
+
+        const del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "취소";
+        del.addEventListener("click", () => removeAutoBuy(item.id));
+
+        main.appendChild(title);
+        main.appendChild(sub);
+        row.appendChild(main);
+        row.appendChild(del);
+        els.autoBuyList.appendChild(row);
+      });
+    }
+  }
+
+  if (els.autoSellList) {
+    els.autoSellList.innerHTML = "";
+    const items = state.autoSellOrders.filter(x => x.code === state.selectedCode).slice(0, 30);
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state-box";
+      empty.textContent = "등록된 예약판매가 없어요";
+      els.autoSellList.appendChild(empty);
+    } else {
+      items.forEach(item => {
+        const row = document.createElement("div");
+        row.className = "auto-item";
+
+        const main = document.createElement("div");
+        main.className = "auto-item-main";
+
+        const title = document.createElement("div");
+        title.className = "auto-item-title";
+        title.textContent = `${item.name} · ${item.targetPrice ? `목표 ${formatKRW(item.targetPrice)}` : "목표 없음"} / ${item.stopPrice ? `손절 ${formatKRW(item.stopPrice)}` : "손절 없음"}`;
+
+        const sub = document.createElement("div");
+        sub.className = "auto-item-sub";
+        sub.textContent = `${item.useAll ? "전량" : formatQty(item.qty)} · ${item.createdAt}`;
+
+        const del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "취소";
+        del.addEventListener("click", () => removeAutoSell(item.id));
+
+        main.appendChild(title);
+        main.appendChild(sub);
+        row.appendChild(main);
+        row.appendChild(del);
+        els.autoSellList.appendChild(row);
+      });
+    }
+  }
+}
+
+function renderPortfolio() {
+  const total = totalAsset();
+  const profit = baselineProfit();
+  const baselineRate = baselineProfitRate();
+  const absoluteRate = absoluteProfitRate();
+  const invested = investedAmount();
+  const stockVal = stockValue();
+  const unrl = unrealizedProfit();
+
+  setText(els.totalAssetTop, formatKRW(total));
+  if (els.profitLossTop) {
+    els.profitLossTop.innerHTML = `${formatSignedKRW(profit)}<span class="subline ${profit >= 0 ? "positive" : "negative"}">${formatSignedPct(baselineRate)}</span>`;
+  }
+  setText(els.cashTop, formatKRW(state.portfolio.cash));
+
+  setText(els.portfolioTotal, formatKRW(total));
+  if (els.portfolioPL) {
+    els.portfolioPL.textContent = `${formatSignedKRW(profit)} (${formatSignedPct(baselineRate)})`;
+    els.portfolioPL.classList.remove("positive", "negative");
+    els.portfolioPL.classList.add(profit >= 0 ? "positive" : "negative");
+  }
+
+  setText(els.portfolioCash, formatKRW(state.portfolio.cash));
+  setText(els.portfolioStockValue, formatKRW(stockVal));
+  setText(els.portfolioInvested, formatKRW(invested));
+  setText(els.portfolioRate, formatSignedPct(invested > 0 ? (unrl / invested) * 100 : 0));
+  setText(els.portfolioAbsoluteRate, formatSignedPct(absoluteRate));
+  setText(els.portfolioRealized, formatSignedKRW(state.realizedProfit));
+  setText(els.portfolioBaselineRate, formatSignedPct(baselineRate));
+  setText(els.portfolioUnrealized, formatSignedKRW(unrl));
+}
+
+function renderWatchlists() {
+  const list = filteredStocks();
+
+  if (els.watchlist) {
+    els.watchlist.innerHTML = "";
+    list.forEach(stock => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `watch-item${stock.code === state.selectedCode ? " active" : ""}`;
+      btn.addEventListener("click", () => {
+        state.selectedCode = stock.code;
+        queueSave();
+        renderAll();
+      });
+
+      const left = document.createElement("div");
+      left.className = "watch-left";
+
+      const logo = document.createElement("div");
+      logo.className = "watch-logo";
+      logo.textContent = stock.logo;
+
+      const meta = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "watch-name";
+      name.textContent = stock.name;
+
+      const theme = document.createElement("div");
+      theme.className = "watch-theme";
+      theme.textContent = `${stock.code} · ${stock.theme}`;
+
+      meta.appendChild(name);
+      meta.appendChild(theme);
+      left.appendChild(logo);
+      left.appendChild(meta);
+
+      const right = document.createElement("div");
+      right.className = "watch-right";
+
+      const price = document.createElement("div");
+      price.className = "watch-price";
+      price.textContent = formatKRW(stock.currentPrice);
+
+      const rate = document.createElement("div");
+      rate.className = `watch-rate ${stockRate(stock) >= 0 ? "positive" : "negative"}`;
+      rate.textContent = `${formatSignedPct(stockRate(stock))}`;
+
+      const mini = document.createElement("div");
+      mini.className = "watch-mini";
+      mini.textContent = `거래량 ${formatVolume(stock.volume)}`;
+
+      right.appendChild(price);
+      right.appendChild(rate);
+      right.appendChild(mini);
+
+      btn.appendChild(left);
+      btn.appendChild(right);
+      els.watchlist.appendChild(btn);
+    });
+  }
+
+  if (els.favoritesList) {
+    const favs = state.favorites
+      .map(code => state.stocks.find(s => s.code === code))
+      .filter(Boolean);
+
+    els.favoritesList.innerHTML = "";
+    if (!favs.length) {
+      els.favoritesList.textContent = "즐겨찾기한 종목이 아직 없어요";
+      els.favoritesList.className = "watchlist-block empty-state-box";
+    } else {
+      els.favoritesList.className = "watchlist-block";
+      favs.forEach(stock => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "favorite-stock-chip";
+        btn.textContent = `${stock.name} ${formatSignedPct(stockRate(stock))}`;
+        btn.addEventListener("click", () => {
+          state.selectedCode = stock.code;
+          queueSave();
+          renderAll();
+        });
+        els.favoritesList.appendChild(btn);
+      });
+    }
+  }
+}
+
+function renderHeroSelects() {
+  if (els.heroStockSelect) {
+    const current = state.selectedCode;
+    els.heroStockSelect.innerHTML = "";
+    state.stocks.forEach(stock => {
+      const opt = document.createElement("option");
+      opt.value = stock.code;
+      opt.textContent = `${stock.name} (${stock.code})`;
+      els.heroStockSelect.appendChild(opt);
+    });
+    els.heroStockSelect.value = current;
+  }
+
+  if (els.adminStockSelect) {
+    const current = state.selectedCode;
+    els.adminStockSelect.innerHTML = "";
+    state.stocks.forEach(stock => {
+      const opt = document.createElement("option");
+      opt.value = stock.code;
+      opt.textContent = `${stock.name} (${stock.code})`;
+      els.adminStockSelect.appendChild(opt);
+    });
+    els.adminStockSelect.value = current;
+  }
+}
+function renderAdminPanel() {
+  if (!els.adminOverlay) return;
+  els.adminOverlay.classList.toggle("hidden", !state.isAdmin && !els.adminOverlay.dataset.open);
+
+  if (els.adminInitialCash) els.adminInitialCash.value = String(toInt(state.settings.initialCash, DEFAULT_SETTINGS.initialCash));
+  if (els.adminSupportAmount) els.adminSupportAmount.value = String(toInt(state.settings.supportFundAmount, DEFAULT_SETTINGS.supportFundAmount));
+  if (els.adminSupportLimit) els.adminSupportLimit.value = String(toInt(state.settings.supportFundCashLimit, DEFAULT_SETTINGS.supportFundCashLimit));
+  if (els.adminFeeRate) els.adminFeeRate.value = String(toNum(state.settings.feeRate, DEFAULT_SETTINGS.feeRate));
+  if (els.adminVolatility) els.adminVolatility.value = String(toNum(state.settings.globalVolatility, 1));
+  if (els.adminNewsFreq) els.adminNewsFreq.value = String(toNum(state.settings.newsFrequency, 1));
+  if (els.adminUpperLimitRate) els.adminUpperLimitRate.value = String(toNum(state.settings.upperLimitRate, 0.3));
+  if (els.adminLowerLimitRate) els.adminLowerLimitRate.value = String(toNum(state.settings.lowerLimitRate, 0.3));
+  if (els.adminDailyLimitEnabled) els.adminDailyLimitEnabled.checked = !!state.settings.dailyLimitEnabled;
+  if (els.adminHighSpeedEnabled) els.adminHighSpeedEnabled.checked = !!state.settings.adminHighSpeedEnabled;
+
+  const stock = selectedStock();
+  if (els.adminStockSelect) els.adminStockSelect.value = stock?.code || "";
+  if (els.adminStockPrice) els.adminStockPrice.value = String(toInt(stock?.currentPrice, 0));
+  if (els.adminStockFixed) els.adminStockFixed.checked = !!stock?.isFixed;
+
+  if (els.adminPanelBox) els.adminPanelBox.classList.toggle("hidden", !state.isAdmin);
+  if (els.adminLoginBox) els.adminLoginBox.classList.toggle("hidden", !!state.isAdmin);
+}
+
+function openAdminModal() {
+  if (!els.adminOverlay) return;
+  els.adminOverlay.dataset.open = "1";
+  els.adminOverlay.classList.remove("hidden");
+  renderAdminPanel();
+}
+
+function closeAdminModal() {
+  if (!els.adminOverlay) return;
+  delete els.adminOverlay.dataset.open;
+  if (!state.isAdmin) els.adminOverlay.classList.add("hidden");
+  renderAdminPanel();
+}
+
+function adminLogin() {
+  const code = (els.adminCodeInput?.value || "").trim();
+  if (code !== ADMIN_CODE) {
+    toast("관리자 코드가 올바르지 않아요", "down");
+    return;
+  }
+  state.isAdmin = true;
+  if (els.adminCodeInput) els.adminCodeInput.value = "";
+  renderSpeedButtons();
+  renderAdminPanel();
   queueSave();
+  toast("관리자 모드가 활성화됐어요", "event");
+}
+
+function saveAdminSettings() {
+  state.settings.initialCash = Math.max(10000, toInt(els.adminInitialCash?.value, state.settings.initialCash));
+  state.settings.supportFundAmount = Math.max(0, toInt(els.adminSupportAmount?.value, state.settings.supportFundAmount));
+  state.settings.supportFundCashLimit = Math.max(0, toInt(els.adminSupportLimit?.value, state.settings.supportFundCashLimit));
+  state.settings.feeRate = clamp(toNum(els.adminFeeRate?.value, state.settings.feeRate), 0, 0.1);
+  state.settings.globalVolatility = clamp(toNum(els.adminVolatility?.value, state.settings.globalVolatility), 0.2, 10);
+  state.settings.newsFrequency = clamp(toNum(els.adminNewsFreq?.value, state.settings.newsFrequency), 0.2, 10);
+  state.settings.upperLimitRate = clamp(toNum(els.adminUpperLimitRate?.value, state.settings.upperLimitRate), 0.05, 1);
+  state.settings.lowerLimitRate = clamp(toNum(els.adminLowerLimitRate?.value, state.settings.lowerLimitRate), 0.05, 0.95);
+  state.settings.dailyLimitEnabled = !!els.adminDailyLimitEnabled?.checked;
+  state.settings.adminHighSpeedEnabled = !!els.adminHighSpeedEnabled?.checked;
+
+  if (!state.settings.adminHighSpeedEnabled && state.speed > 50) state.speed = 50;
+
+  queueSave();
+  renderAll();
+  toast("관리자 설정이 저장됐어요", "event");
+}
+
+function applyAdminStockControls() {
+  const code = els.adminStockSelect?.value || state.selectedCode;
+  const stock = state.stocks.find(s => s.code === code);
+  if (!stock) return;
+
+  const newPrice = Math.max(1, toInt(els.adminStockPrice?.value, stock.currentPrice));
+  stock.currentPrice = newPrice;
+  stock.dayHigh = Math.max(stock.dayHigh, newPrice);
+  stock.dayLow = Math.min(stock.dayLow, newPrice);
+  stock.isFixed = !!els.adminStockFixed?.checked;
+  stock.history.push(newPrice);
+  if (stock.history.length > 240) stock.history.shift();
+  stock.historyLong.push(newPrice);
+  if (stock.historyLong.length > 3000) stock.historyLong.shift();
+  buildOrderbook(stock);
+
+  if (state.selectedCode !== code) state.selectedCode = code;
+
+  queueSave();
+  renderAll();
+  toast(`${stock.name} 가격이 반영됐어요`, "event");
 }
 
 function bindEvents() {
-  addEvent(els.heroStockSelect, "change", e => {
-    state.selectedCode = e.target.value;
-    updateOrderInputs();
-    render(true);
-    queueSave();
-  });
-
-  addEvent(els.buyModeBtn, "click", () => setOrderMode("buy"));
-  addEvent(els.sellModeBtn, "click", () => setOrderMode("sell"));
-  addEvent(els.orderQty, "input", updateOrderInputs);
-  addEvent(els.orderPrice, "input", updateOrderInputs);
-  addEvent(els.submitOrderBtn, "click", () => submitOrder());
-  addEvent(els.addAutoSellBtn, "click", addAutoSellOrder);
-  addEvent(byId("addAutoBuyBtn"), "click", addAutoBuyOrder);
-
-  addEvent(els.searchInput, "input", e => {
-    renderWatchlist();
-  });
-
-  qa(".sort-btn").forEach(btn => btn.addEventListener("click", () => {
-    state.sortBy = btn.dataset.sort;
-    qa(".sort-btn").forEach(x => x.classList.toggle("active", x === btn));
-    renderWatchlist();
-    queueSave();
-  }));
-
-  qa(".tab-btn").forEach(btn => btn.addEventListener("click", () => {
-    state.chartRange = btn.dataset.chartRange;
-    qa(".tab-btn").forEach(x => x.classList.toggle("active", x === btn));
-    drawChart();
-    queueSave();
-  }));
-
-  qa(".history-tab").forEach(btn => btn.addEventListener("click", () => {
-    state.historyTab = btn.dataset.historyTab;
-    renderHistory();
-    queueSave();
-  }));
-
-  addEvent(els.clearHistoryBtn, "click", () => {
-    if (state.historyTab === "orders") state.orderHistory = [];
-    else state.alerts = [];
-    renderHistory();
-    queueSave();
-  });
-
-  addEvent(els.supportFundBtn, "click", claimSupportFund);
+  addEvent(els.supportFundBtn, "click", maybeSupportFund);
   addEvent(els.pauseBtn, "click", () => {
     state.isPaused = true;
-    addAlert("시뮬레이션을 잠깐 멈췄어요", "normal");
-    renderHistory();
+    toast("일시정지됐어요", "event");
   });
   addEvent(els.resumeBtn, "click", () => {
     state.isPaused = false;
     state.isStopped = false;
-    addAlert("시뮬레이션을 다시 시작했어요", "up");
-    renderHistory();
+    toast("재개됐어요", "event");
   });
   addEvent(els.stopBtn, "click", () => {
     state.isStopped = true;
-    addAlert("시뮬레이션을 정지했어요", "down");
-    renderHistory();
+    toast("정지됐어요", "down");
   });
-  addEvent(els.resetBtn, "click", hardReset);
-  addEvent(byId("resetBaselineBtn"), "click", resetBaseline);
-
-  addEvent(byId("toggleActiveOrdersBtn"), "click", () => {
-    const target = state.orderMode === "buy" ? byId("autoBuyModeBox") : byId("autoSellModeBox");
-    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
-
-  addEvent(els.favoriteToggleBtn, "click", () => {
-    const code = state.selectedCode;
-    if (state.favorites.includes(code)) state.favorites = state.favorites.filter(x => x !== code);
-    else state.favorites.unshift(code);
-    renderHero();
-    renderWatchlist();
-    queueSave();
-  });
-
-  addEvent(els.adminEntryBtn, "click", () => byId("adminOverlay")?.classList.remove("hidden"));
-  addEvent(byId("closeAdminModalBtn"), "click", () => byId("adminOverlay")?.classList.add("hidden"));
-
-  addEvent(byId("adminLoginBtn"), "click", () => {
-    const code = byId("adminCodeInput")?.value || "";
-    if (code === ADMIN_CODE) {
-      state.isAdmin = true;
-      renderAdminPanel();
-      renderHeader();
-      renderSpeedButtons();
-      queueSave();
-      addAlert("관리자 모드가 활성화됐어요", "up");
-      renderHistory();
-    } else {
-      addAlert("관리자 코드가 맞지 않아요", "down");
-      renderHistory();
-    }
-  });
-
-  addEvent(byId("saveAdminSettingsBtn"), "click", () => {
-    if (!state.isAdmin) return;
-
-    state.settings.initialCash = Math.max(1000, toInt(byId("adminInitialCash")?.value, state.settings.initialCash));
-    state.settings.supportFundAmount = Math.max(0, toInt(byId("adminSupportAmount")?.value, state.settings.supportFundAmount));
-    state.settings.supportFundCashLimit = Math.max(0, toInt(byId("adminSupportLimit")?.value, state.settings.supportFundCashLimit));
-    state.settings.feeRate = clamp(toNum(byId("adminFeeRate")?.value, state.settings.feeRate), 0, 0.3);
-    state.settings.globalVolatility = clamp(toNum(byId("adminVolatility")?.value, state.settings.globalVolatility), 0.2, 10);
-    state.settings.newsFrequency = clamp(toNum(byId("adminNewsFreq")?.value, state.settings.newsFrequency), 0.2, 10);
-    state.settings.adminHighSpeedEnabled = !!byId("adminHighSpeedEnabled")?.checked;
-    state.settings.dailyLimitEnabled = !!byId("adminDailyLimitEnabled")?.checked;
-    state.settings.upperLimitRate = clamp(toNum(byId("adminUpperLimitRate")?.value, state.settings.upperLimitRate), 0.05, 1);
-    state.settings.lowerLimitRate = clamp(toNum(byId("adminLowerLimitRate")?.value, state.settings.lowerLimitRate), 0.05, 0.95);
-
-    if (state.speed > 50 && !state.settings.adminHighSpeedEnabled) state.speed = 50;
-
-    addAlert("관리자 설정을 저장했어요", "up");
-    render();
-    restartTick();
-    queueSave();
-  });
-
-  addEvent(byId("applyAdminStockPriceBtn"), "click", () => {
-    if (!state.isAdmin) return;
-    const code = byId("adminStockSelect")?.value;
-    const stock = state.stocks.find(s => s.code === code);
-    const price = Math.max(1, toInt(byId("adminStockPrice")?.value, stock?.currentPrice || 1));
-    if (!stock) return;
-
-    stock.currentPrice = price;
-    stock.dayHigh = Math.max(stock.dayHigh, price);
-    stock.dayLow = Math.min(stock.dayLow, price);
-    stock.history.push(price);
-    if (stock.history.length > 240) stock.history.shift();
-    buildOrderbook(stock);
-
-    addAlert(`${stock.name} 가격을 ${formatKRW(price)}로 조정했어요`, "normal");
-    render(true);
-    queueSave();
-  });
-
-  addEvent(byId("forceBaselineResetBtn"), "click", resetBaseline);
-  addEvent(byId("adminCancelAllAutoSellBtn"), "click", () => { state.autoSellOrders = []; renderAutoLists(); queueSave(); });
-  addEvent(byId("adminCancelAllAutoBuyBtn"), "click", () => { state.autoBuyOrders = []; renderAutoLists(); queueSave(); });
-  addEvent(byId("adminResetAllBtn"), "click", hardReset);
-
+  addEvent(els.resetBtn, "click", resetAllData);
   addEvent(els.saveSlotBtn, "click", () => {
-    try {
-      const payload = btoa(unescape(encodeURIComponent(JSON.stringify(exportStatePayload()))));
-      window.prompt("저장 문자열을 복사해 주세요.", payload);
-    } catch {
-      toast("저장 문자열 생성에 실패했어요.", "down");
-    }
+    saveState();
+    toast("저장됐어요", "event");
+  });
+  addEvent(els.loadSlotBtn, "click", () => {
+    loadState();
+    renderAll();
+    toast("불러왔어요", "event");
+  });
+  addEvent(els.favoriteToggleBtn, "click", () => toggleFavorite(state.selectedCode));
+  addEvent(els.heroStockSelect, "change", e => {
+    state.selectedCode = e.target.value;
+    queueSave();
+    renderAll();
+  });
+  addEvent(els.searchInput, "input", renderWatchlists);
+
+  addEvent(els.buyModeBtn, "click", () => {
+    state.orderMode = "buy";
+    queueSave();
+    renderOrderPanel();
+  });
+  addEvent(els.sellModeBtn, "click", () => {
+    state.orderMode = "sell";
+    queueSave();
+    renderOrderPanel();
   });
 
-  addEvent(els.loadSlotBtn, "click", () => {
-    const raw = window.prompt("저장 문자열을 붙여넣어 주세요.");
-    if (!raw) return;
-    try {
-      const json = decodeURIComponent(escape(atob(raw.trim())));
-      const parsed = JSON.parse(json);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-      loadState();
-      injectExtraUI();
-      collectEls();
-      render(true);
-      restartTick();
-      toast("불러오기가 완료됐어요.", "up");
-    } catch {
-      toast("불러오기 문자열이 올바르지 않아요.", "down");
-    }
+  addEvent(els.orderQty, "input", () => renderOrderPanel());
+  addEvent(els.submitOrderBtn, "click", submitManualOrder);
+  addEvent(els.addAutoBuyBtn, "click", submitAutoBuy);
+  addEvent(els.addAutoSellBtn, "click", submitAutoSell);
+  addEvent(els.resetBaselineBtn, "click", resetBaseline);
+  addEvent(els.toggleActiveOrdersBtn, "click", cancelAllAutoOrders);
+  addEvent(els.clearHistoryBtn, "click", clearHistories);
+
+  qa(".history-tab").forEach(btn => {
+    addEvent(btn, "click", () => {
+      state.historyTab = btn.dataset.historyTab === "alerts" ? "alerts" : "orders";
+      queueSave();
+      renderHistory();
+    });
+  });
+
+  qa(".sort-btn").forEach(btn => {
+    addEvent(btn, "click", () => {
+      state.sortBy = btn.dataset.sort === "volume" ? "volume" : "change";
+      qa(".sort-btn").forEach(x => x.classList.toggle("active", x === btn));
+      queueSave();
+      renderWatchlists();
+    });
+  });
+
+  addEvent(els.adminEntryBtn, "click", openAdminModal);
+  addEvent(els.closeAdminModalBtn, "click", closeAdminModal);
+  addEvent(els.adminLoginBtn, "click", adminLogin);
+  addEvent(els.applyAdminStockPriceBtn, "click", applyAdminStockControls);
+  addEvent(els.saveAdminSettingsBtn, "click", saveAdminSettings);
+  addEvent(els.forceBaselineResetBtn, "click", resetBaseline);
+  addEvent(els.adminCancelAllAutoSellBtn, "click", () => {
+    state.autoSellOrders = [];
+    queueSave();
+    renderAutoLists();
+    toast("예약판매를 모두 취소했어요", "event");
+  });
+  addEvent(els.adminCancelAllAutoBuyBtn, "click", () => {
+    state.autoBuyOrders = [];
+    queueSave();
+    renderAutoLists();
+    toast("예약구매를 모두 취소했어요", "event");
+  });
+  addEvent(els.adminResetAllBtn, "click", resetAllData);
+
+  addEvent(els.adminStockSelect, "change", e => {
+    state.selectedCode = e.target.value;
+    renderAll();
+  });
+
+  addEvent(window, "resize", () => renderChart());
+  bindChartHover();
+}
+
+function renderAll() {
+  renderHeroSelects();
+  renderSpeedButtons();
+  renderChartTabs();
+  renderHero();
+  renderChart();
+  renderPortfolio();
+  renderWatchlists();
+  renderNewsFeed();
+  renderHistory();
+  renderAdminPanel();
+}
+
+function tickLoop() {
+  if (state.isPaused || state.isStopped) return;
+
+  rollVirtualTime();
+
+  for (const stock of state.stocks) {
+    updateOneStock(stock);
+  }
+
+  processAutoOrders();
+
+  state.chartRenderCounter += 1;
+  renderHero();
+  renderPortfolio();
+  renderWatchlists();
+  renderNewsFeed();
+  renderHistory();
+
+  if (state.chartRenderCounter % (state.speed >= 100 ? 3 : state.speed >= 20 ? 2 : 1) === 0) {
+    renderChart();
+  }
+
+  queueSave();
+}
+
+function collectElements() {
+  [
+    "totalAssetTop","profitLossTop","cashTop",
+    "supportFundBtn","pauseBtn","resumeBtn","stopBtn","resetBtn","saveSlotBtn","loadSlotBtn","adminEntryBtn","alertBellBtn","alertBadge",
+    "symbolLogo","selectedName","selectedCode","favoriteToggleBtn","heroStockSelect",
+    "selectedPrice","selectedChange","dayHigh","dayLow","dayOpen","dayVolume",
+    "speedButtons","moodFill","moodText","chartTabs","priceChart","chartTooltip",
+    "selectedNewsTitleName","selectedNewsCount","selectedNewsFeed",
+    "holdingQtyInline","avgPriceInline","availableCash","maxBuyQty","currentHoldingQty","currentAvgPrice",
+    "buyModeBtn","sellModeBtn","currentTradePriceLabel","orderPrice","orderQty","quickRow","estimatedCost","estimatedFee","submitOrderBtn",
+    "autoModeTitle","autoModeDesc","autoBuyModeBox","autoSellModeBox",
+    "autoBuyTargetPrice","autoBuyQty","autoBuyBudget","autoBuyMax","addAutoBuyBtn","autoBuyList",
+    "autoSellTargetPrice","autoSellStopPrice","autoSellQty","autoSellAll","addAutoSellBtn","autoSellList",
+    "orderbookRows","newsCountChip","newsFeed","clearHistoryBtn","orderHistoryList","alertHistoryList",
+    "portfolioTotal","portfolioPL","portfolioCash","portfolioStockValue","portfolioInvested","portfolioRate",
+    "portfolioAbsoluteRate","portfolioRealized","portfolioBaselineRate","portfolioUnrealized","resetBaselineBtn","toggleActiveOrdersBtn",
+    "searchInput","favoritesList","marketAlertBadge","watchlist",
+    "adminOverlay","closeAdminModalBtn","adminCodeInput","adminLoginBtn","adminLoginBox","adminPanelBox",
+    "adminInitialCash","adminSupportAmount","adminSupportLimit","adminFeeRate","adminVolatility","adminNewsFreq",
+    "adminUpperLimitRate","adminLowerLimitRate","adminDailyLimitEnabled","adminHighSpeedEnabled",
+    "adminStockSelect","adminStockPrice","adminStockFixed",
+    "applyAdminStockPriceBtn","saveAdminSettingsBtn","forceBaselineResetBtn","adminCancelAllAutoSellBtn","adminCancelAllAutoBuyBtn","adminResetAllBtn"
+  ].forEach(id => {
+    els[id] = byId(id);
   });
 }
 
-function init() {
-  loadState();
-  collectEls();
-  injectExtraUI();
-  bindEvents();
-  setOrderMode(state.orderMode);
-  render(true);
+function startLoop() {
+  if (tickTimer) clearInterval(tickTimer);
+  tickTimer = setInterval(() => {
+    try {
+      tickLoop();
+    } catch (e) {
+      console.error("tickLoop", e);
+    }
+  }, 500);
+}
 
-  if (tickTimer) clearTimeout(tickTimer);
-  restartTick();
+function init() {
+  collectElements();
+  loadState();
+
+  if (!state.stocks.length) defaultState();
+
+  bindEvents();
+  renderAll();
+  startLoop();
 }
 
 document.addEventListener("DOMContentLoaded", init);
