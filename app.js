@@ -1,4 +1,4 @@
-const STORAGE_KEY = "stock_mock_sim_v34";
+const STORAGE_KEY = "stock_mock_sim_toss_v41";
 const ADMIN_CODE = "010814";
 
 const DEFAULT_SETTINGS = {
@@ -11,8 +11,8 @@ const DEFAULT_SETTINGS = {
   marketBias: 0,
   adminHighSpeedEnabled: false,
   dailyLimitEnabled: true,
-  upperLimitRate: 0.30,
-  lowerLimitRate: 0.30
+  upperLimitRate: 0.3,
+  lowerLimitRate: 0.3
 };
 
 const CHART_RANGES = [
@@ -89,6 +89,9 @@ const GENERIC_NEWS = {
   ]
 };
 
+const SPEEDS_BASE = [1, 2, 5, 10, 20, 50];
+const SPEEDS_ADMIN = [100, 200, 300];
+
 const state = {
   speed: 1,
   selectedCode: "KQ001",
@@ -96,9 +99,11 @@ const state = {
   sortBy: "change",
   chartRange: "1m",
   historyTab: "orders",
+  quoteMode: "real",
   isPaused: false,
   isStopped: false,
   isAdmin: false,
+  adminOverlayOpen: false,
   settings: { ...DEFAULT_SETTINGS },
   baseline: { totalAsset: DEFAULT_SETTINGS.initialCash, startedAt: Date.now() },
   realizedProfit: 0,
@@ -110,6 +115,8 @@ const state = {
   orderHistory: [],
   autoSellOrders: [],
   autoBuyOrders: [],
+  quoteTicks: {},
+  investorFlows: {},
   virtualTime: Date.now(),
   virtualDateKey: "",
   chartRenderCounter: 0
@@ -119,19 +126,45 @@ const els = {};
 let tickTimer = null;
 let saveTimer = null;
 
-function q(sel, root = document) { return root.querySelector(sel); }
-function qa(sel, root = document) { return Array.from(root.querySelectorAll(sel)); }
-function byId(id) { return document.getElementById(id); }
-function setText(el, value) { if (el) el.textContent = value; }
-function addEvent(el, type, fn) { if (el) el.addEventListener(type, fn); }
-function toNum(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
-function toInt(v, d = 0) { const n = Math.floor(Number(v)); return Number.isFinite(n) ? n : d; }
-function rand(min, max) { return Math.random() * (max - min) + min; }
-function randInt(min, max) { return Math.floor(rand(min, max + 1)); }
-function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
-
-function formatKRW(v) { return `${Math.round(toNum(v)).toLocaleString("ko-KR")}원`; }
+function byId(id) {
+  return document.getElementById(id);
+}
+function setText(el, value) {
+  if (el) el.textContent = value;
+}
+function addEvent(el, type, fn) {
+  if (el) el.addEventListener(type, fn);
+}
+function toNum(v, d = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+}
+function toInt(v, d = 0) {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) ? n : d;
+}
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v));
+}
+function rand(min, max) {
+  return Math.random() * (max - min) + min;
+}
+function randInt(min, max) {
+  return Math.floor(rand(min, max + 1));
+}
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+function safeJsonParse(raw, fallback) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+function formatKRW(v) {
+  return `${Math.round(toNum(v)).toLocaleString("ko-KR")}원`;
+}
 function formatSignedKRW(v) {
   const n = Math.round(toNum(v));
   return `${n >= 0 ? "+" : ""}${n.toLocaleString("ko-KR")}원`;
@@ -140,12 +173,18 @@ function formatSignedPct(v) {
   const n = toNum(v);
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
-function formatQty(v) { return `${Math.max(0, toInt(v)).toLocaleString("ko-KR")}주`; }
+function formatQty(v) {
+  return `${Math.max(0, toInt(v)).toLocaleString("ko-KR")}주`;
+}
 function formatVolume(v) {
   const n = toNum(v);
   if (n >= 100000000) return `${(n / 100000000).toFixed(2)}억`;
   if (n >= 10000) return `${(n / 10000).toFixed(1)}만`;
   return Math.round(n).toLocaleString("ko-KR");
+}
+function formatBigNumber(v) {
+  const n = Math.round(toNum(v));
+  return `${n >= 0 ? "+" : ""}${Math.abs(n).toLocaleString("ko-KR")}`;
 }
 function nowTime() {
   const d = new Date(state.virtualTime || Date.now());
@@ -167,7 +206,15 @@ function dateKeyFromTime(ts) {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
-function feeOf(amount) { return Math.round(toNum(amount) * toNum(state.settings.feeRate)); }
+function feeOf(amount) {
+  return Math.round(toNum(amount) * toNum(state.settings.feeRate));
+}
+function allowedSpeeds() {
+  return state.isAdmin && state.settings.adminHighSpeedEnabled ? [...SPEEDS_BASE, ...SPEEDS_ADMIN] : [...SPEEDS_BASE];
+}
+function typeLabel(type) {
+  return ({ good: "호재", bad: "악재", event: "이벤트", breaking: "속보" })[type] || "알림";
+}
 
 function makeStock([code, name, logo, theme, base, priceClass, style]) {
   const volatilityMap = { cheap: 0.045, mid: 0.022, large: 0.015, expensive: 0.011, premium: 0.009 };
@@ -198,8 +245,52 @@ function makeStock([code, name, logo, theme, base, priceClass, style]) {
     eventBias: 0,
     eventTicks: 0,
     flash: 0,
-    haltedDirection: null
+    haltedDirection: null,
+    isFixed: false
   };
+}
+
+function makeQuoteTick(stock) {
+  const rate = stockRate(stock);
+  return {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    price: stock.currentPrice,
+    qty: randInt(1, 500),
+    rate,
+    volume: randInt(1000, 50000),
+    time: nowTime()
+  };
+}
+
+function initInvestorFlow(code) {
+  const rows = [];
+  let personal = randInt(-9000000, 9000000);
+  let foreign = randInt(-9000000, 9000000);
+  let institution = -(personal + foreign) + randInt(-1000000, 1000000);
+  rows.push({
+    date: "오늘",
+    personal,
+    foreign,
+    institution
+  });
+  for (let i = 1; i <= 8; i++) {
+    rows.push({
+      date: randomPastDateLabel(i),
+      personal: randInt(-15000000, 15000000),
+      foreign: randInt(-15000000, 15000000),
+      institution: randInt(-15000000, 15000000)
+    });
+  }
+  state.investorFlows[code] = rows;
+}
+
+function randomPastDateLabel(offset) {
+  const d = new Date(state.virtualTime || Date.now());
+  d.setDate(d.getDate() - offset);
+  const yy = String(d.getFullYear()).slice(2);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yy}.${mm}.${dd}`;
 }
 
 function defaultState() {
@@ -209,9 +300,11 @@ function defaultState() {
   state.sortBy = "change";
   state.chartRange = "1m";
   state.historyTab = "orders";
+  state.quoteMode = "real";
   state.isPaused = false;
   state.isStopped = false;
   state.isAdmin = false;
+  state.adminOverlayOpen = false;
   state.settings = { ...DEFAULT_SETTINGS };
   state.baseline = { totalAsset: DEFAULT_SETTINGS.initialCash, startedAt: Date.now() };
   state.realizedProfit = 0;
@@ -226,12 +319,13 @@ function defaultState() {
   state.virtualTime = Date.now();
   state.virtualDateKey = dateKeyFromTime(state.virtualTime);
   state.chartRenderCounter = 0;
-  state.stocks.forEach(buildOrderbook);
-}
-
-function safeJsonParse(raw, fallback) {
-  try { return JSON.parse(raw); }
-  catch { return fallback; }
+  state.quoteTicks = {};
+  state.investorFlows = {};
+  state.stocks.forEach(stock => {
+    buildOrderbook(stock);
+    state.quoteTicks[stock.code] = Array.from({ length: 18 }, () => makeQuoteTick(stock));
+    initInvestorFlow(stock.code);
+  });
 }
 
 function exportStatePayload() {
@@ -242,6 +336,7 @@ function exportStatePayload() {
     sortBy: state.sortBy,
     chartRange: state.chartRange,
     historyTab: state.historyTab,
+    quoteMode: state.quoteMode,
     settings: state.settings,
     baseline: state.baseline,
     realizedProfit: state.realizedProfit,
@@ -253,6 +348,8 @@ function exportStatePayload() {
     orderHistory: state.orderHistory,
     autoSellOrders: state.autoSellOrders,
     autoBuyOrders: state.autoBuyOrders,
+    quoteTicks: state.quoteTicks,
+    investorFlows: state.investorFlows,
     virtualTime: state.virtualTime,
     virtualDateKey: state.virtualDateKey
   };
@@ -275,21 +372,18 @@ function loadState() {
   defaultState();
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return;
-
   const data = safeJsonParse(raw, null);
   if (!data || typeof data !== "object") return;
 
-  state.speed = [1,2,5,10,20,50,100,200,300].includes(toInt(data.speed, 1)) ? toInt(data.speed, 1) : 1;
+  state.speed = allowedSpeeds().includes(toInt(data.speed, 1)) ? toInt(data.speed, 1) : 1;
   state.selectedCode = typeof data.selectedCode === "string" ? data.selectedCode : "KQ001";
   state.orderMode = data.orderMode === "sell" ? "sell" : "buy";
   state.sortBy = ["change", "volume"].includes(data.sortBy) ? data.sortBy : "change";
   state.chartRange = CHART_RANGES.some(x => x.key === data.chartRange) ? data.chartRange : "1m";
   state.historyTab = ["orders", "alerts"].includes(data.historyTab) ? data.historyTab : "orders";
+  state.quoteMode = data.quoteMode === "daily" ? "daily" : "real";
 
-  state.settings = {
-    ...DEFAULT_SETTINGS,
-    ...(data.settings || {})
-  };
+  state.settings = { ...DEFAULT_SETTINGS, ...(data.settings || {}) };
   state.settings.initialCash = Math.max(10000, toInt(state.settings.initialCash, DEFAULT_SETTINGS.initialCash));
   state.settings.supportFundAmount = Math.max(0, toInt(state.settings.supportFundAmount, DEFAULT_SETTINGS.supportFundAmount));
   state.settings.supportFundCashLimit = Math.max(0, toInt(state.settings.supportFundCashLimit, DEFAULT_SETTINGS.supportFundCashLimit));
@@ -354,15 +448,20 @@ function loadState() {
     return fresh;
   });
 
+  state.quoteTicks = data.quoteTicks && typeof data.quoteTicks === "object" ? data.quoteTicks : {};
+  state.investorFlows = data.investorFlows && typeof data.investorFlows === "object" ? data.investorFlows : {};
+
+  state.stocks.forEach(stock => {
+    buildOrderbook(stock);
+    if (!Array.isArray(state.quoteTicks[stock.code])) state.quoteTicks[stock.code] = Array.from({ length: 18 }, () => makeQuoteTick(stock));
+    if (!Array.isArray(state.investorFlows[stock.code])) initInvestorFlow(stock.code);
+  });
+
   if (!state.stocks.some(s => s.code === state.selectedCode)) {
     state.selectedCode = state.stocks[0]?.code || "KQ001";
   }
 
-  state.stocks.forEach(buildOrderbook);
-
-  if (state.speed > 50 && !(state.isAdmin && state.settings.adminHighSpeedEnabled)) {
-    state.speed = 50;
-  }
+  if (!allowedSpeeds().includes(state.speed)) state.speed = 50;
 }
 
 function selectedStock() {
@@ -480,10 +579,6 @@ function recordOrder(entry) {
   if (state.orderHistory.length > 200) state.orderHistory.length = 200;
 }
 
-function typeLabel(type) {
-  return ({ good: "호재", bad: "주의", event: "이벤트", breaking: "속보" })[type] || "알림";
-}
-
 function toast(text, tone = "normal") {
   addAlert(text, tone);
   renderHistory();
@@ -522,6 +617,19 @@ function onVirtualDayChanged() {
     stock.eventTicks = 0;
     stock.historyLong.push(stock.currentPrice);
     if (stock.historyLong.length > 3000) stock.historyLong.shift();
+    state.quoteTicks[stock.code] = Array.from({ length: 18 }, () => makeQuoteTick(stock));
+    state.investorFlows[stock.code] = [
+      {
+        date: "오늘",
+        personal: randInt(-15000000, 15000000),
+        foreign: randInt(-15000000, 15000000),
+        institution: randInt(-15000000, 15000000)
+      },
+      ...(state.investorFlows[stock.code] || []).slice(0, 8).map((row, idx) => ({
+        ...row,
+        date: idx === 0 ? randomPastDateLabel(1) : row.date
+      }))
+    ].slice(0, 9);
   });
   addAlert(`가상 날짜 변경 · ${formatVirtualDateTime()}`, "event");
 }
@@ -559,17 +667,46 @@ function maybeCreateNews(stock) {
   pushNews(type, stock, pick(GENERIC_NEWS[type]), impact);
 }
 
+function updateQuoteTicks(stock, oldPrice) {
+  const list = Array.isArray(state.quoteTicks[stock.code]) ? state.quoteTicks[stock.code] : [];
+  const count = state.speed >= 100 ? 6 : state.speed >= 20 ? 4 : 2;
+  for (let i = 0; i < count; i++) {
+    const price = Math.max(1, stock.currentPrice + randInt(-Math.max(1, Math.round(stock.currentPrice * 0.002)), Math.max(1, Math.round(stock.currentPrice * 0.002))));
+    list.unshift({
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      price,
+      qty: randInt(1, 500),
+      rate: stock.prevClose > 0 ? ((price - stock.prevClose) / stock.prevClose) * 100 : 0,
+      volume: randInt(500, 50000),
+      time: nowTime()
+    });
+  }
+  state.quoteTicks[stock.code] = list.slice(0, 60);
+
+  const flow = Array.isArray(state.investorFlows[stock.code]) ? state.investorFlows[stock.code] : [];
+  if (!flow.length) initInvestorFlow(stock.code);
+  if (Array.isArray(state.investorFlows[stock.code]) && state.investorFlows[stock.code][0]) {
+    const first = state.investorFlows[stock.code][0];
+    const delta = stock.currentPrice - oldPrice;
+    first.personal += randInt(-800000, 800000) + (delta < 0 ? randInt(0, 300000) : -randInt(0, 180000));
+    first.foreign += randInt(-900000, 900000) + (delta > 0 ? randInt(0, 250000) : -randInt(0, 250000));
+    first.institution += randInt(-600000, 600000) + randInt(-150000, 150000);
+  }
+}
+
 function updateOneStock(stock) {
   if (!stock) return;
+  const oldPrice = stock.currentPrice;
+
   if (stock.isFixed) {
     stock.flash = 0;
     buildOrderbook(stock);
+    updateQuoteTicks(stock, oldPrice);
     return;
   }
 
   maybeCreateNews(stock);
 
-  const oldPrice = stock.currentPrice;
   const styleBoost =
     stock.style === "stable" ? 0.65 :
     stock.style === "momentum" ? 1.25 :
@@ -601,7 +738,7 @@ function updateOneStock(stock) {
       stock.haltedDirection = "down";
       stock.eventBias = rand(0.01, 0.05);
       stock.eventTicks = randInt(3, 10);
-      pushNews("bad", stock, `하한가 도달`, -0.15);
+      pushNews("bad", stock, "하한가 도달로 VI가 발동됐어요", -0.15);
     } else {
       stock.haltedDirection = null;
     }
@@ -627,7 +764,9 @@ function updateOneStock(stock) {
 
   buildOrderbook(stock);
   stock.flash = next > oldPrice ? 1 : next < oldPrice ? -1 : 0;
+  updateQuoteTicks(stock, oldPrice);
 }
+
 function processAutoOrders() {
   const stocksByCode = new Map(state.stocks.map(s => [s.code, s]));
 
@@ -636,12 +775,10 @@ function processAutoOrders() {
     for (const order of state.autoBuyOrders) {
       const stock = stocksByCode.get(order.code);
       if (!stock) continue;
-
       if (stock.haltedDirection === "down") {
         remain.push(order);
         continue;
       }
-
       const targetPrice = Math.max(1, toInt(order.targetPrice, 0));
       const wantedQty = Math.max(1, toInt(order.qty, 0));
       const budget = Math.max(0, toInt(order.budget, 0));
@@ -649,14 +786,12 @@ function processAutoOrders() {
 
       if (stock.currentPrice <= targetPrice) {
         let qty = wantedQty;
-
         if (useMax) {
           qty = calculateMaxBuyQty(stock.currentPrice);
         } else if (budget > 0) {
           const maxByBudget = Math.floor(budget / (stock.currentPrice * (1 + state.settings.feeRate)));
           qty = Math.min(qty, Math.max(0, maxByBudget));
         }
-
         if (qty > 0) {
           const done = executeBuy(stock, qty, stock.currentPrice, true, "예약구매");
           if (!done) remain.push(order);
@@ -673,12 +808,10 @@ function processAutoOrders() {
     for (const order of state.autoSellOrders) {
       const stock = stocksByCode.get(order.code);
       if (!stock) continue;
-
       if (stock.haltedDirection === "down") {
         remain.push(order);
         continue;
       }
-
       const holding = holdingOf(order.code);
       if (holding.qty <= 0) continue;
 
@@ -753,31 +886,24 @@ function clearHistories() {
 function executeBuy(stock, qty, price, isAuto = false, reason = "매수") {
   if (!stock || qty <= 0 || price <= 0) return false;
   if (stock.haltedDirection === "down") {
-    toast(`${stock.name}은 현재 VI 상태라 거래할 수 없어요`, "down");
+    if (!isAuto) toast(`${stock.name}은 현재 VI 상태라 거래할 수 없어요`, "down");
     return false;
   }
-
   const gross = qty * price;
   const fee = feeOf(gross);
   const total = gross + fee;
-
   if (state.portfolio.cash < total) {
     if (!isAuto) toast("주문 가능 현금이 부족해요", "down");
     return false;
   }
 
   state.portfolio.cash -= total;
-
   const holding = holdingOf(stock.code);
   const oldQty = holding.qty || 0;
   const oldAvg = holding.avgPrice || 0;
   const newQty = oldQty + qty;
   const newAvg = newQty > 0 ? ((oldQty * oldAvg) + (qty * price)) / newQty : 0;
-
-  state.portfolio.holdings[stock.code] = {
-    qty: newQty,
-    avgPrice: newAvg
-  };
+  state.portfolio.holdings[stock.code] = { qty: newQty, avgPrice: newAvg };
 
   recordOrder({
     side: "buy",
@@ -799,7 +925,7 @@ function executeBuy(stock, qty, price, isAuto = false, reason = "매수") {
 function executeSell(stock, qty, price, isAuto = false, reason = "매도") {
   if (!stock || qty <= 0 || price <= 0) return false;
   if (stock.haltedDirection === "down") {
-    toast(`${stock.name}은 현재 VI 상태라 거래할 수 없어요`, "down");
+    if (!isAuto) toast(`${stock.name}은 현재 VI 상태라 거래할 수 없어요`, "down");
     return false;
   }
 
@@ -821,10 +947,7 @@ function executeSell(stock, qty, price, isAuto = false, reason = "매도") {
   if (newQty <= 0) {
     delete state.portfolio.holdings[stock.code];
   } else {
-    state.portfolio.holdings[stock.code] = {
-      qty: newQty,
-      avgPrice: holding.avgPrice
-    };
+    state.portfolio.holdings[stock.code] = { qty: newQty, avgPrice: holding.avgPrice };
   }
 
   recordOrder({
@@ -856,15 +979,10 @@ function executeSell(stock, qty, price, isAuto = false, reason = "매도") {
 function submitManualOrder() {
   const stock = selectedStock();
   if (!stock) return;
-
   const qty = Math.max(1, toInt(els.orderQty?.value, 1));
   const price = stock.currentPrice;
-
-  if (state.orderMode === "buy") {
-    executeBuy(stock, qty, price, false, "매수");
-  } else {
-    executeSell(stock, qty, price, false, "매도");
-  }
+  if (state.orderMode === "buy") executeBuy(stock, qty, price, false, "매수");
+  else executeSell(stock, qty, price, false, "매도");
 }
 
 function submitAutoBuy() {
@@ -974,7 +1092,6 @@ function currentSearch() {
 function filteredStocks() {
   const keyword = currentSearch();
   let list = state.stocks.slice();
-
   if (keyword) {
     list = list.filter(stock =>
       stock.name.toLowerCase().includes(keyword) ||
@@ -982,13 +1099,38 @@ function filteredStocks() {
       stock.theme.toLowerCase().includes(keyword)
     );
   }
-
   if (state.sortBy === "volume") {
     list.sort((a, b) => b.volume - a.volume);
   } else {
     list.sort((a, b) => stockRate(b) - stockRate(a));
   }
   return list;
+}
+
+function renderHeroSelects() {
+  if (els.heroStockSelect) {
+    const current = state.selectedCode;
+    els.heroStockSelect.innerHTML = "";
+    state.stocks.forEach(stock => {
+      const opt = document.createElement("option");
+      opt.value = stock.code;
+      opt.textContent = `${stock.name} (${stock.code})`;
+      els.heroStockSelect.appendChild(opt);
+    });
+    els.heroStockSelect.value = current;
+  }
+
+  if (els.adminStockSelect) {
+    const current = state.selectedCode;
+    els.adminStockSelect.innerHTML = "";
+    state.stocks.forEach(stock => {
+      const opt = document.createElement("option");
+      opt.value = stock.code;
+      opt.textContent = `${stock.name} (${stock.code})`;
+      els.adminStockSelect.appendChild(opt);
+    });
+    els.adminStockSelect.value = current;
+  }
 }
 
 function renderHero() {
@@ -1004,8 +1146,7 @@ function renderHero() {
   const rate = stockRate(stock);
   if (els.selectedChange) {
     els.selectedChange.textContent = `${formatSignedKRW(diff)} (${formatSignedPct(rate)})`;
-    els.selectedChange.classList.remove("positive", "negative");
-    els.selectedChange.classList.add(diff >= 0 ? "positive" : "negative");
+    els.selectedChange.style.color = diff >= 0 ? "var(--red)" : "var(--blue2)";
   }
 
   setText(els.dayOpen, formatKRW(stock.openPrice));
@@ -1021,11 +1162,7 @@ function renderHero() {
     els.favoriteToggleBtn.textContent = state.favorites.includes(stock.code) ? "★" : "☆";
   }
 
-  const moodScore = clamp(
-    ((stockRate(stock) / 20) * 50) + 50 + (stock.eventBias * 40),
-    0,
-    100
-  );
+  const moodScore = clamp(((stockRate(stock) / 20) * 50) + 50 + (stock.eventBias * 40), 0, 100);
   if (els.moodFill) els.moodFill.style.width = `${moodScore}%`;
 
   let moodText = "지금은 중립적인 분위기예요";
@@ -1038,14 +1175,13 @@ function renderHero() {
   renderOrderPanel();
   renderSelectedNews();
   renderOrderbook();
+  renderQuoteTable();
+  renderInvestorPanel();
 }
 
 function renderSpeedButtons() {
   if (!els.speedButtons) return;
-  const speeds = [1, 2, 5, 10, 20, 50];
-  const adminSpeeds = state.isAdmin && state.settings.adminHighSpeedEnabled ? [100, 200, 300] : [];
-  const all = [...speeds, ...adminSpeeds];
-
+  const all = allowedSpeeds();
   els.speedButtons.innerHTML = "";
   all.forEach(spd => {
     const btn = document.createElement("button");
@@ -1084,7 +1220,6 @@ function getChartSeries(stock) {
   if (!stock) return [];
   const long = stock.historyLong.slice();
   const short = stock.history.slice();
-
   if (state.chartRange === "1m") return short.slice(-60);
   if (state.chartRange === "5m") return short.slice(-180);
   if (state.chartRange === "1d") return [...long.slice(-160), ...short.slice(-80)].slice(-220);
@@ -1120,6 +1255,26 @@ function sampleSeriesForHighSpeed(series, width) {
     sampled.push(avg);
   }
   return sampled;
+}
+
+function drawMaLine(ctx, series, xAt, yAt, color) {
+  ctx.beginPath();
+  let started = false;
+  for (let i = 0; i < series.length; i++) {
+    const v = series[i];
+    if (v == null) continue;
+    const x = xAt(i);
+    const y = yAt(v);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
 }
 
 function renderChart() {
@@ -1230,35 +1385,9 @@ function renderChart() {
   ctx.fillStyle = lineColor;
   ctx.fill();
 
-  canvas._chartMeta = {
-    series,
-    xAt,
-    yAt,
-    pad,
-    cssWidth,
-    cssHeight
-  };
+  canvas._chartMeta = { series, xAt, yAt, pad, cssWidth, cssHeight };
 }
 
-function drawMaLine(ctx, series, xAt, yAt, color) {
-  ctx.beginPath();
-  let started = false;
-  for (let i = 0; i < series.length; i++) {
-    const v = series[i];
-    if (v == null) continue;
-    const x = xAt(i);
-    const y = yAt(v);
-    if (!started) {
-      ctx.moveTo(x, y);
-      started = true;
-    } else {
-      ctx.lineTo(x, y);
-    }
-  }
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.8;
-  ctx.stroke();
-}
 function bindChartHover() {
   if (!els.priceChart) return;
 
@@ -1279,7 +1408,7 @@ function bindChartHover() {
     els.chartTooltip.innerHTML = `
       <div style="font-weight:900;font-size:13px;margin-bottom:4px;">${selectedStock()?.name || ""}</div>
       <div>가격 <b>${formatKRW(price)}</b></div>
-      <div>변동률 <b class="${rate >= 0 ? "positive" : "negative"}">${formatSignedPct(rate)}</b></div>
+      <div>변동률 <b style="color:${rate >= 0 ? "#ff92ad" : "#67c2ff"}">${formatSignedPct(rate)}</b></div>
       <div style="margin-top:4px;color:#9fb2d8;">구간 ${safeIdx + 1} / ${meta.series.length}</div>
     `;
   };
@@ -1287,29 +1416,6 @@ function bindChartHover() {
   els.priceChart.addEventListener("mousemove", showTip);
   els.priceChart.addEventListener("mouseleave", () => {
     if (els.chartTooltip) els.chartTooltip.classList.add("hidden");
-  });
-}
-
-function renderSelectedNews() {
-  const stock = selectedStock();
-  const list = (state.news || []).filter(n => n.code === stock?.code).slice(0, 18);
-
-  setText(els.selectedNewsTitleName, stock?.name || "");
-  setText(els.selectedNewsCount, `${list.length}건`);
-
-  if (!els.selectedNewsFeed) return;
-  els.selectedNewsFeed.innerHTML = "";
-
-  if (!list.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state-box";
-    empty.textContent = "아직 이 종목 관련 뉴스가 없어요";
-    els.selectedNewsFeed.appendChild(empty);
-    return;
-  }
-
-  list.forEach(item => {
-    els.selectedNewsFeed.appendChild(makeNewsCard(item));
   });
 }
 
@@ -1345,13 +1451,28 @@ function makeNewsCard(item) {
   return card;
 }
 
+function renderSelectedNews() {
+  const stock = selectedStock();
+  const list = (state.news || []).filter(n => n.code === stock?.code).slice(0, 18);
+  setText(els.selectedNewsTitleName, stock?.name || "");
+  setText(els.selectedNewsCount, `${list.length}건`);
+  if (!els.selectedNewsFeed) return;
+  els.selectedNewsFeed.innerHTML = "";
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state-box";
+    empty.textContent = "아직 이 종목 관련 뉴스가 없어요";
+    els.selectedNewsFeed.appendChild(empty);
+    return;
+  }
+  list.forEach(item => els.selectedNewsFeed.appendChild(makeNewsCard(item)));
+}
+
 function renderNewsFeed() {
   if (!els.newsFeed) return;
   const list = state.news.slice(0, 36);
-
   setText(els.newsCountChip, `${list.length}건`);
   els.newsFeed.innerHTML = "";
-
   if (!list.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state-box";
@@ -1359,18 +1480,14 @@ function renderNewsFeed() {
     els.newsFeed.appendChild(empty);
     return;
   }
-
-  list.forEach(item => {
-    els.newsFeed.appendChild(makeNewsCard(item));
-  });
+  list.forEach(item => els.newsFeed.appendChild(makeNewsCard(item)));
 }
 
 function renderHistoryTabs() {
-  qa(".history-tab").forEach(btn => {
+  document.querySelectorAll(".history-tab").forEach(btn => {
     const tab = btn.dataset.historyTab;
     btn.classList.toggle("active", tab === state.historyTab);
   });
-
   if (els.orderHistoryList) els.orderHistoryList.classList.toggle("hidden", state.historyTab !== "orders");
   if (els.alertHistoryList) els.alertHistoryList.classList.toggle("hidden", state.historyTab !== "alerts");
 }
@@ -1399,12 +1516,11 @@ function makeOrderHistoryCard(item) {
 
   const sub = document.createElement("div");
   sub.className = "history-sub";
-
   if (item.side === "buy") {
     sub.innerHTML = `총액 <b>${formatKRW(item.total)}</b> · 수수료 <b>${formatKRW(item.fee)}</b>`;
   } else {
     const realized = toNum(item.realized, 0);
-    sub.innerHTML = `수령액 <b>${formatKRW(item.total)}</b> · 실현손익 <b class="${realized >= 0 ? "positive" : "negative"}">${formatSignedKRW(realized)}</b>`;
+    sub.innerHTML = `수령액 <b>${formatKRW(item.total)}</b> · 실현손익 <b style="color:${realized >= 0 ? "#ff92ad" : "#67c2ff"}">${formatSignedKRW(realized)}</b>`;
   }
 
   card.appendChild(top);
@@ -1477,40 +1593,105 @@ function renderOrderbook() {
   const stock = selectedStock();
   if (!stock || !els.orderbookRows) return;
 
-  const asks = [];
-  const bids = [];
-  (stock.orderbook || []).forEach(row => {
-    if (row.type === "ask") asks.push(row);
-    else bids.push(row);
-  });
+  const asks = (stock.orderbook || []).filter(row => row.type === "ask");
+  const bids = (stock.orderbook || []).filter(row => row.type === "bid");
+  const maxAskQty = Math.max(1, ...asks.map(x => x.qty), 1);
+  const maxBidQty = Math.max(1, ...bids.map(x => x.qty), 1);
 
-  const maxRows = Math.max(asks.length, bids.length, 12);
   els.orderbookRows.innerHTML = "";
-
-  for (let i = 0; i < maxRows; i++) {
+  for (let i = 0; i < 12; i++) {
     const ask = asks[i] || { qty: 0, price: stock.currentPrice + (i + 1) };
     const bid = bids[i] || { qty: 0, price: Math.max(1, stock.currentPrice - (i + 1)) };
 
     const row = document.createElement("div");
     row.className = "orderbook-row";
+    row.style.gridTemplateColumns = "1fr 120px 1fr";
+    row.style.gap = "10px";
+    row.style.alignItems = "center";
 
-    const askQty = document.createElement("div");
-    askQty.className = "ask-qty";
-    askQty.textContent = ask.qty > 0 ? ask.qty.toLocaleString("ko-KR") : "-";
+    const askWrap = document.createElement("div");
+    askWrap.style.position = "relative";
+    askWrap.style.minHeight = "34px";
+    askWrap.style.display = "flex";
+    askWrap.style.alignItems = "center";
+    askWrap.style.justifyContent = "flex-end";
+    askWrap.style.padding = "0 10px";
+    askWrap.style.borderRadius = "10px";
+    askWrap.style.overflow = "hidden";
+    askWrap.style.background = "rgba(255,255,255,.03)";
+    const askBar = document.createElement("div");
+    askBar.style.position = "absolute";
+    askBar.style.right = "0";
+    askBar.style.top = "0";
+    askBar.style.bottom = "0";
+    askBar.style.width = `${(ask.qty / maxAskQty) * 100}%`;
+    askBar.style.background = "rgba(255,95,130,.22)";
+    const askText = document.createElement("span");
+    askText.style.position = "relative";
+    askText.style.color = "#ff92ad";
+    askText.style.fontWeight = "800";
+    askText.textContent = ask.qty > 0 ? ask.qty.toLocaleString("ko-KR") : "-";
+    askWrap.appendChild(askBar);
+    askWrap.appendChild(askText);
 
     const mid = document.createElement("div");
-    mid.className = `mid-price ${ask.price >= stock.prevClose ? "mid-up" : "mid-down"}`;
+    mid.style.minHeight = "34px";
+    mid.style.display = "flex";
+    mid.style.alignItems = "center";
+    mid.style.justifyContent = "center";
+    mid.style.borderRadius = "10px";
+    mid.style.background = "rgba(255,255,255,.04)";
+    mid.style.fontWeight = "900";
+    mid.style.color = ask.price >= stock.prevClose ? "#ff92ad" : "#67c2ff";
     mid.textContent = formatKRW(ask.price);
 
-    const bidQty = document.createElement("div");
-    bidQty.className = "bid-qty";
-    bidQty.textContent = bid.qty > 0 ? bid.qty.toLocaleString("ko-KR") : "-";
+    const bidWrap = document.createElement("div");
+    bidWrap.style.position = "relative";
+    bidWrap.style.minHeight = "34px";
+    bidWrap.style.display = "flex";
+    bidWrap.style.alignItems = "center";
+    bidWrap.style.justifyContent = "flex-start";
+    bidWrap.style.padding = "0 10px";
+    bidWrap.style.borderRadius = "10px";
+    bidWrap.style.overflow = "hidden";
+    bidWrap.style.background = "rgba(255,255,255,.03)";
+    const bidBar = document.createElement("div");
+    bidBar.style.position = "absolute";
+    bidBar.style.left = "0";
+    bidBar.style.top = "0";
+    bidBar.style.bottom = "0";
+    bidBar.style.width = `${(bid.qty / maxBidQty) * 100}%`;
+    bidBar.style.background = "rgba(79,149,255,.22)";
+    const bidText = document.createElement("span");
+    bidText.style.position = "relative";
+    bidText.style.color = "#67c2ff";
+    bidText.style.fontWeight = "800";
+    bidText.textContent = bid.qty > 0 ? bid.qty.toLocaleString("ko-KR") : "-";
+    bidWrap.appendChild(bidBar);
+    bidWrap.appendChild(bidText);
 
-    row.appendChild(askQty);
+    row.appendChild(askWrap);
     row.appendChild(mid);
-    row.appendChild(bidQty);
+    row.appendChild(bidWrap);
     els.orderbookRows.appendChild(row);
   }
+
+  setText(els.obHighPrice, formatKRW(stock.dayHigh));
+  setText(els.obLowPrice, formatKRW(stock.dayLow));
+  setText(els.obOpenPrice, formatKRW(stock.openPrice));
+  setText(els.obCurrentPrice, formatKRW(stock.currentPrice));
+
+  const askSum = asks.reduce((a, b) => a + b.qty, 0);
+  const bidSum = bids.reduce((a, b) => a + b.qty, 0);
+  const total = Math.max(1, askSum + bidSum);
+  const sellPct = (askSum / total) * 100;
+  const buyPct = (bidSum / total) * 100;
+
+  if (els.strengthSellBar) els.strengthSellBar.style.width = `${sellPct}%`;
+  if (els.strengthBuyBar) els.strengthBuyBar.style.width = `${buyPct}%`;
+  if (els.orderStrengthValue) setText(els.orderStrengthValue, `${((bidSum / Math.max(1, askSum)) * 100).toFixed(2)}%`);
+  if (els.orderSellMeta) setText(els.orderSellMeta, askSum.toLocaleString("ko-KR"));
+  if (els.orderBuyMeta) setText(els.orderBuyMeta, bidSum.toLocaleString("ko-KR"));
 }
 
 function renderOrderPanel() {
@@ -1533,31 +1714,28 @@ function renderOrderPanel() {
   const qty = Math.max(1, toInt(els.orderQty?.value, 1));
   const gross = qty * stock.currentPrice;
   const fee = feeOf(gross);
-
   setText(els.estimatedCost, formatKRW(gross));
   setText(els.estimatedFee, formatKRW(fee));
 
   if (els.buyModeBtn) {
     els.buyModeBtn.classList.toggle("active", state.orderMode === "buy");
     els.buyModeBtn.classList.toggle("buy", state.orderMode === "buy");
+    els.buyModeBtn.classList.remove("sell");
   }
   if (els.sellModeBtn) {
     els.sellModeBtn.classList.toggle("active", state.orderMode === "sell");
     els.sellModeBtn.classList.toggle("sell", state.orderMode === "sell");
+    els.sellModeBtn.classList.remove("buy");
   }
 
   if (els.submitOrderBtn) {
     els.submitOrderBtn.classList.toggle("buy", state.orderMode === "buy");
     els.submitOrderBtn.classList.toggle("sell", state.orderMode === "sell");
-    els.submitOrderBtn.textContent = state.orderMode === "buy" ? "매수 실행" : "매도 실행";
+    els.submitOrderBtn.textContent = state.orderMode === "buy" ? "구매하기" : "판매하기";
   }
 
   if (els.autoModeTitle) setText(els.autoModeTitle, state.orderMode === "buy" ? "예약구매 · 조건매수" : "예약판매 · 조건매도");
-  if (els.autoModeDesc) setText(els.autoModeDesc, state.orderMode === "buy"
-    ? "원하는 가격까지 내려오면 자동으로 매수할 수 있어요"
-    : "목표가 도달 또는 손절 조건에서 자동으로 판매해요"
-  );
-
+  if (els.autoModeDesc) setText(els.autoModeDesc, state.orderMode === "buy" ? "원하는 가격까지 내려오면 자동으로 매수할 수 있어요" : "목표가 도달 또는 손절 조건에서 자동으로 판매해요");
   if (els.autoBuyModeBox) els.autoBuyModeBox.classList.toggle("hidden", state.orderMode !== "buy");
   if (els.autoSellModeBox) els.autoSellModeBox.classList.toggle("hidden", state.orderMode !== "sell");
 
@@ -1695,15 +1873,14 @@ function renderPortfolio() {
 
   setText(els.totalAssetTop, formatKRW(total));
   if (els.profitLossTop) {
-    els.profitLossTop.innerHTML = `${formatSignedKRW(profit)}<span class="subline ${profit >= 0 ? "positive" : "negative"}">${formatSignedPct(baselineRate)}</span>`;
+    els.profitLossTop.innerHTML = `${formatSignedKRW(profit)}<span class="subline" style="display:block;margin-top:4px;color:${profit >= 0 ? "#ff92ad" : "#67c2ff"}">${formatSignedPct(baselineRate)}</span>`;
   }
   setText(els.cashTop, formatKRW(state.portfolio.cash));
-
   setText(els.portfolioTotal, formatKRW(total));
+
   if (els.portfolioPL) {
     els.portfolioPL.textContent = `${formatSignedKRW(profit)} (${formatSignedPct(baselineRate)})`;
-    els.portfolioPL.classList.remove("positive", "negative");
-    els.portfolioPL.classList.add(profit >= 0 ? "positive" : "negative");
+    els.portfolioPL.style.color = profit >= 0 ? "#ff92ad" : "#67c2ff";
   }
 
   setText(els.portfolioCash, formatKRW(state.portfolio.cash));
@@ -1760,7 +1937,8 @@ function renderWatchlists() {
       price.textContent = formatKRW(stock.currentPrice);
 
       const rate = document.createElement("div");
-      rate.className = `watch-rate ${stockRate(stock) >= 0 ? "positive" : "negative"}`;
+      rate.className = "watch-rate";
+      rate.style.color = stockRate(stock) >= 0 ? "#ff92ad" : "#67c2ff";
       rate.textContent = `${formatSignedPct(stockRate(stock))}`;
 
       const mini = document.createElement("div");
@@ -1778,10 +1956,7 @@ function renderWatchlists() {
   }
 
   if (els.favoritesList) {
-    const favs = state.favorites
-      .map(code => state.stocks.find(s => s.code === code))
-      .filter(Boolean);
-
+    const favs = state.favorites.map(code => state.stocks.find(s => s.code === code)).filter(Boolean);
     els.favoritesList.innerHTML = "";
     if (!favs.length) {
       els.favoritesList.textContent = "즐겨찾기한 종목이 아직 없어요";
@@ -1802,36 +1977,94 @@ function renderWatchlists() {
       });
     }
   }
+
+  document.querySelectorAll(".sort-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.sort === state.sortBy);
+  });
 }
 
-function renderHeroSelects() {
-  if (els.heroStockSelect) {
-    const current = state.selectedCode;
-    els.heroStockSelect.innerHTML = "";
-    state.stocks.forEach(stock => {
-      const opt = document.createElement("option");
-      opt.value = stock.code;
-      opt.textContent = `${stock.name} (${stock.code})`;
-      els.heroStockSelect.appendChild(opt);
-    });
-    els.heroStockSelect.value = current;
-  }
+function renderQuoteTable() {
+  if (!els.quoteTableBody) return;
+  const stock = selectedStock();
+  const ticks = Array.isArray(state.quoteTicks[stock.code]) ? state.quoteTicks[stock.code] : [];
+  els.quoteTableBody.innerHTML = "";
 
-  if (els.adminStockSelect) {
-    const current = state.selectedCode;
-    els.adminStockSelect.innerHTML = "";
-    state.stocks.forEach(stock => {
-      const opt = document.createElement("option");
-      opt.value = stock.code;
-      opt.textContent = `${stock.name} (${stock.code})`;
-      els.adminStockSelect.appendChild(opt);
-    });
-    els.adminStockSelect.value = current;
-  }
+  const list = state.quoteMode === "daily"
+    ? ticks.slice(0, 14).map((row, idx) => ({
+        ...row,
+        volume: row.volume * (idx + 1),
+        qty: row.qty + randInt(10, 900)
+      }))
+    : ticks.slice(0, 14);
+
+  list.forEach(row => {
+    const item = document.createElement("div");
+    item.style.display = "grid";
+    item.style.gridTemplateColumns = "repeat(4,1fr)";
+    item.style.fontSize = "12px";
+    item.style.padding = "8px 0";
+    item.style.borderBottom = "1px solid rgba(255,255,255,.04)";
+    item.innerHTML = `
+      <span>${formatKRW(row.price)}</span>
+      <span>${row.qty.toLocaleString("ko-KR")}</span>
+      <span style="color:${row.rate >= 0 ? "#ff92ad" : "#67c2ff"}">${formatSignedPct(row.rate)}</span>
+      <span>${formatVolume(row.volume)}</span>
+    `;
+    els.quoteTableBody.appendChild(item);
+  });
 }
+
+function renderInvestorPanel() {
+  const stock = selectedStock();
+  const rows = Array.isArray(state.investorFlows[stock.code]) ? state.investorFlows[stock.code] : [];
+  if (!rows.length) return;
+
+  const today = rows[0];
+  const maxAbs = Math.max(
+    Math.abs(today.personal || 0),
+    Math.abs(today.foreign || 0),
+    Math.abs(today.institution || 0),
+    1
+  );
+
+  setText(els.investorPersonalValue, formatBigNumber(today.personal));
+  setText(els.investorForeignValue, formatBigNumber(today.foreign));
+  setText(els.investorInstitutionValue, formatBigNumber(today.institution));
+
+  if (els.investorPersonalValue) els.investorPersonalValue.style.color = today.personal >= 0 ? "#ff92ad" : "#67c2ff";
+  if (els.investorForeignValue) els.investorForeignValue.style.color = today.foreign >= 0 ? "#ff92ad" : "#67c2ff";
+  if (els.investorInstitutionValue) els.investorInstitutionValue.style.color = today.institution >= 0 ? "#ff92ad" : "#67c2ff";
+
+  if (els.investorPersonalBar) els.investorPersonalBar.style.width = `${(Math.abs(today.personal) / maxAbs) * 100}%`;
+  if (els.investorForeignBar) els.investorForeignBar.style.width = `${(Math.abs(today.foreign) / maxAbs) * 100}%`;
+  if (els.investorInstitutionBar) els.investorInstitutionBar.style.width = `${(Math.abs(today.institution) / maxAbs) * 100}%`;
+
+  if (els.investorPersonalBar) els.investorPersonalBar.style.background = today.personal >= 0 ? "var(--red)" : "var(--blue2)";
+  if (els.investorForeignBar) els.investorForeignBar.style.background = today.foreign >= 0 ? "var(--red)" : "var(--blue2)";
+  if (els.investorInstitutionBar) els.investorInstitutionBar.style.background = today.institution >= 0 ? "var(--red)" : "var(--blue2)";
+
+  if (!els.investorTableBody) return;
+  els.investorTableBody.innerHTML = "";
+  rows.forEach(row => {
+    const el = document.createElement("div");
+    el.style.display = "grid";
+    el.style.gridTemplateColumns = "repeat(4,1fr)";
+    el.style.fontSize = "12px";
+    el.style.padding = "9px 0";
+    el.style.borderBottom = "1px solid rgba(255,255,255,.04)";
+    el.innerHTML = `
+      <span>${row.date}</span>
+      <span style="color:${row.personal >= 0 ? "#ff92ad" : "#67c2ff"}">${formatBigNumber(row.personal)}</span>
+      <span style="color:${row.foreign >= 0 ? "#ff92ad" : "#67c2ff"}">${formatBigNumber(row.foreign)}</span>
+      <span style="color:${row.institution >= 0 ? "#ff92ad" : "#67c2ff"}">${formatBigNumber(row.institution)}</span>
+    `;
+    els.investorTableBody.appendChild(el);
+  });
+}
+
 function renderAdminPanel() {
   if (!els.adminOverlay) return;
-  els.adminOverlay.classList.toggle("hidden", !state.isAdmin && !els.adminOverlay.dataset.open);
+  els.adminOverlay.classList.toggle("hidden", !state.adminOverlayOpen);
 
   if (els.adminInitialCash) els.adminInitialCash.value = String(toInt(state.settings.initialCash, DEFAULT_SETTINGS.initialCash));
   if (els.adminSupportAmount) els.adminSupportAmount.value = String(toInt(state.settings.supportFundAmount, DEFAULT_SETTINGS.supportFundAmount));
@@ -1854,16 +2087,12 @@ function renderAdminPanel() {
 }
 
 function openAdminModal() {
-  if (!els.adminOverlay) return;
-  els.adminOverlay.dataset.open = "1";
-  els.adminOverlay.classList.remove("hidden");
+  state.adminOverlayOpen = true;
   renderAdminPanel();
 }
 
 function closeAdminModal() {
-  if (!els.adminOverlay) return;
-  delete els.adminOverlay.dataset.open;
-  if (!state.isAdmin) els.adminOverlay.classList.add("hidden");
+  state.adminOverlayOpen = false;
   renderAdminPanel();
 }
 
@@ -1890,11 +2119,7 @@ function saveAdminSettings() {
   state.settings.newsFrequency = clamp(toNum(els.adminNewsFreq?.value, state.settings.newsFrequency), 0.2, 10);
   state.settings.upperLimitRate = clamp(toNum(els.adminUpperLimitRate?.value, state.settings.upperLimitRate), 0.05, 1);
   state.settings.lowerLimitRate = clamp(toNum(els.adminLowerLimitRate?.value, state.settings.lowerLimitRate), 0.05, 0.95);
-  state.settings.dailyLimitEnabled = !!els.adminDailyLimitEnabled?.checked;
-  state.settings.adminHighSpeedEnabled = !!els.adminHighSpeedEnabled?.checked;
-
   if (!state.settings.adminHighSpeedEnabled && state.speed > 50) state.speed = 50;
-
   queueSave();
   renderAll();
   toast("관리자 설정이 저장됐어요", "event");
@@ -1917,10 +2142,26 @@ function applyAdminStockControls() {
   buildOrderbook(stock);
 
   if (state.selectedCode !== code) state.selectedCode = code;
-
   queueSave();
   renderAll();
   toast(`${stock.name} 가격이 반영됐어요`, "event");
+}
+
+function applyAdminCheckboxLive(which) {
+  if (which === "dailyLimit") {
+    state.settings.dailyLimitEnabled = !!els.adminDailyLimitEnabled?.checked;
+  }
+  if (which === "highSpeed") {
+    state.settings.adminHighSpeedEnabled = !!els.adminHighSpeedEnabled?.checked;
+    if (!state.settings.adminHighSpeedEnabled && state.speed > 50) state.speed = 50;
+  }
+  if (which === "fixedPrice") {
+    const code = els.adminStockSelect?.value || state.selectedCode;
+    const stock = state.stocks.find(s => s.code === code);
+    if (stock) stock.isFixed = !!els.adminStockFixed?.checked;
+  }
+  queueSave();
+  renderAll();
 }
 
 function bindEvents() {
@@ -1948,6 +2189,7 @@ function bindEvents() {
     renderAll();
     toast("불러왔어요", "event");
   });
+
   addEvent(els.favoriteToggleBtn, "click", () => toggleFavorite(state.selectedCode));
   addEvent(els.heroStockSelect, "change", e => {
     state.selectedCode = e.target.value;
@@ -1975,7 +2217,7 @@ function bindEvents() {
   addEvent(els.toggleActiveOrdersBtn, "click", cancelAllAutoOrders);
   addEvent(els.clearHistoryBtn, "click", clearHistories);
 
-  qa(".history-tab").forEach(btn => {
+  document.querySelectorAll(".history-tab").forEach(btn => {
     addEvent(btn, "click", () => {
       state.historyTab = btn.dataset.historyTab === "alerts" ? "alerts" : "orders";
       queueSave();
@@ -1983,12 +2225,20 @@ function bindEvents() {
     });
   });
 
-  qa(".sort-btn").forEach(btn => {
+  document.querySelectorAll(".sort-btn").forEach(btn => {
     addEvent(btn, "click", () => {
       state.sortBy = btn.dataset.sort === "volume" ? "volume" : "change";
-      qa(".sort-btn").forEach(x => x.classList.toggle("active", x === btn));
       queueSave();
       renderWatchlists();
+    });
+  });
+
+  document.querySelectorAll(".mini-switch").forEach(btn => {
+    addEvent(btn, "click", () => {
+      state.quoteMode = btn.dataset.quoteMode === "daily" ? "daily" : "real";
+      document.querySelectorAll(".mini-switch").forEach(x => x.classList.toggle("active", x === btn));
+      queueSave();
+      renderQuoteTable();
     });
   });
 
@@ -2017,7 +2267,15 @@ function bindEvents() {
     renderAll();
   });
 
+  addEvent(els.adminDailyLimitEnabled, "change", () => applyAdminCheckboxLive("dailyLimit"));
+  addEvent(els.adminHighSpeedEnabled, "change", () => applyAdminCheckboxLive("highSpeed"));
+  addEvent(els.adminStockFixed, "change", () => applyAdminCheckboxLive("fixedPrice"));
+
   addEvent(window, "resize", () => renderChart());
+  addEvent(els.adminOverlay, "click", e => {
+    if (e.target === els.adminOverlay) closeAdminModal();
+  });
+
   bindChartHover();
 }
 
@@ -2032,17 +2290,18 @@ function renderAll() {
   renderNewsFeed();
   renderHistory();
   renderAdminPanel();
+  document.querySelectorAll(".mini-switch").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.quoteMode === state.quoteMode);
+  });
 }
 
 function tickLoop() {
   if (state.isPaused || state.isStopped) return;
 
   rollVirtualTime();
-
   for (const stock of state.stocks) {
     updateOneStock(stock);
   }
-
   processAutoOrders();
 
   state.chartRenderCounter += 1;
@@ -2052,9 +2311,8 @@ function tickLoop() {
   renderNewsFeed();
   renderHistory();
 
-  if (state.chartRenderCounter % (state.speed >= 100 ? 3 : state.speed >= 20 ? 2 : 1) === 0) {
-    renderChart();
-  }
+  const chartSkip = state.speed >= 200 ? 4 : state.speed >= 100 ? 3 : state.speed >= 20 ? 2 : 1;
+  if (state.chartRenderCounter % chartSkip === 0) renderChart();
 
   queueSave();
 }
@@ -2072,10 +2330,12 @@ function collectElements() {
     "autoModeTitle","autoModeDesc","autoBuyModeBox","autoSellModeBox",
     "autoBuyTargetPrice","autoBuyQty","autoBuyBudget","autoBuyMax","addAutoBuyBtn","autoBuyList",
     "autoSellTargetPrice","autoSellStopPrice","autoSellQty","autoSellAll","addAutoSellBtn","autoSellList",
-    "orderbookRows","newsCountChip","newsFeed","clearHistoryBtn","orderHistoryList","alertHistoryList",
+    "orderbookRows","obHighPrice","obLowPrice","obOpenPrice","obCurrentPrice","orderStrengthValue","strengthSellBar","strengthBuyBar","orderSellMeta","orderBuyMeta",
+    "newsCountChip","newsFeed","clearHistoryBtn","orderHistoryList","alertHistoryList",
     "portfolioTotal","portfolioPL","portfolioCash","portfolioStockValue","portfolioInvested","portfolioRate",
     "portfolioAbsoluteRate","portfolioRealized","portfolioBaselineRate","portfolioUnrealized","resetBaselineBtn","toggleActiveOrdersBtn",
     "searchInput","favoritesList","marketAlertBadge","watchlist",
+    "quoteTableBody","investorPersonalValue","investorForeignValue","investorInstitutionValue","investorPersonalBar","investorForeignBar","investorInstitutionBar","investorTableBody",
     "adminOverlay","closeAdminModalBtn","adminCodeInput","adminLoginBtn","adminLoginBox","adminPanelBox",
     "adminInitialCash","adminSupportAmount","adminSupportLimit","adminFeeRate","adminVolatility","adminNewsFreq",
     "adminUpperLimitRate","adminLowerLimitRate","adminDailyLimitEnabled","adminHighSpeedEnabled",
@@ -2100,9 +2360,7 @@ function startLoop() {
 function init() {
   collectElements();
   loadState();
-
   if (!state.stocks.length) defaultState();
-
   bindEvents();
   renderAll();
   startLoop();
