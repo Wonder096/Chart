@@ -1,4 +1,4 @@
-const STORAGE_KEY = "stock_mock_sim_v32";
+const STORAGE_KEY = "stock_mock_sim_v34";
 const ADMIN_CODE = "010814";
 
 const DEFAULT_SETTINGS = {
@@ -9,8 +9,21 @@ const DEFAULT_SETTINGS = {
   globalVolatility: 1,
   newsFrequency: 1,
   marketBias: 0,
-  adminHighSpeedEnabled: false
+  adminHighSpeedEnabled: false,
+  dailyLimitEnabled: true,
+  upperLimitRate: 0.30,
+  lowerLimitRate: 0.30
 };
+
+const CHART_RANGES = [
+  { key: "1m", label: "1분" },
+  { key: "5m", label: "5분" },
+  { key: "1d", label: "일" },
+  { key: "1w", label: "주" },
+  { key: "1y", label: "1년" },
+  { key: "10y", label: "10년" },
+  { key: "100y", label: "100년" }
+];
 
 const STOCK_BLUEPRINTS = [
   ["KQ001", "한강테크", "한", "AI 반도체", 48200, "mid", "momentum"],
@@ -96,7 +109,10 @@ const state = {
   alerts: [],
   orderHistory: [],
   autoSellOrders: [],
-  autoBuyOrders: []
+  autoBuyOrders: [],
+  virtualTime: Date.now(),
+  virtualDateKey: "",
+  chartRenderCounter: 0
 };
 
 const els = {};
@@ -132,8 +148,24 @@ function formatVolume(v) {
   return Math.round(n).toLocaleString("ko-KR");
 }
 function nowTime() {
-  const d = new Date();
+  const d = new Date(state.virtualTime || Date.now());
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+}
+function formatVirtualDateTime() {
+  const d = new Date(state.virtualTime || Date.now());
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+function dateKeyFromTime(ts) {
+  const d = new Date(ts);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 function feeOf(amount) { return Math.round(toNum(amount) * toNum(state.settings.feeRate)); }
 
@@ -141,7 +173,7 @@ function makeStock([code, name, logo, theme, base, priceClass, style]) {
   const volatilityMap = { cheap: 0.045, mid: 0.022, large: 0.015, expensive: 0.011, premium: 0.009 };
   const history = [];
   let p = base;
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < 180; i++) {
     p = Math.max(1, Math.round(p * (1 + rand(-0.01, 0.01))));
     history.push(p);
   }
@@ -159,12 +191,14 @@ function makeStock([code, name, logo, theme, base, priceClass, style]) {
     dayLow: Math.min(...history, base),
     volume: randInt(10000, 300000),
     history,
+    historyLong: history.slice(-180),
     orderbook: [],
     volatility: volatilityMap[priceClass] || 0.02,
     momentum: rand(-0.5, 0.5),
     eventBias: 0,
     eventTicks: 0,
-    flash: 0
+    flash: 0,
+    haltedDirection: null
   };
 }
 
@@ -189,6 +223,9 @@ function defaultState() {
   state.orderHistory = [];
   state.autoSellOrders = [];
   state.autoBuyOrders = [];
+  state.virtualTime = Date.now();
+  state.virtualDateKey = dateKeyFromTime(state.virtualTime);
+  state.chartRenderCounter = 0;
   state.stocks.forEach(buildOrderbook);
 }
 
@@ -215,7 +252,9 @@ function exportStatePayload() {
     alerts: state.alerts,
     orderHistory: state.orderHistory,
     autoSellOrders: state.autoSellOrders,
-    autoBuyOrders: state.autoBuyOrders
+    autoBuyOrders: state.autoBuyOrders,
+    virtualTime: state.virtualTime,
+    virtualDateKey: state.virtualDateKey
   };
 }
 
@@ -244,7 +283,7 @@ function loadState() {
   state.selectedCode = typeof data.selectedCode === "string" ? data.selectedCode : "KQ001";
   state.orderMode = data.orderMode === "sell" ? "sell" : "buy";
   state.sortBy = ["change", "volume"].includes(data.sortBy) ? data.sortBy : "change";
-  state.chartRange = ["1m", "5m", "1d", "1w"].includes(data.chartRange) ? data.chartRange : "1m";
+  state.chartRange = CHART_RANGES.some(x => x.key === data.chartRange) ? data.chartRange : "1m";
   state.historyTab = ["orders", "alerts"].includes(data.historyTab) ? data.historyTab : "orders";
 
   state.settings = {
@@ -259,6 +298,9 @@ function loadState() {
   state.settings.newsFrequency = clamp(toNum(state.settings.newsFrequency, 1), 0.2, 10);
   state.settings.marketBias = clamp(toNum(state.settings.marketBias, 0), -1, 1);
   state.settings.adminHighSpeedEnabled = !!state.settings.adminHighSpeedEnabled;
+  state.settings.dailyLimitEnabled = !!state.settings.dailyLimitEnabled;
+  state.settings.upperLimitRate = clamp(toNum(state.settings.upperLimitRate, 0.30), 0.05, 10);
+  state.settings.lowerLimitRate = clamp(toNum(state.settings.lowerLimitRate, 0.30), 0.05, 0.99);
 
   state.baseline = {
     totalAsset: Math.max(0, toNum(data.baseline?.totalAsset, state.settings.initialCash)),
@@ -285,6 +327,8 @@ function loadState() {
   state.orderHistory = Array.isArray(data.orderHistory) ? data.orderHistory.slice(0, 200) : [];
   state.autoSellOrders = Array.isArray(data.autoSellOrders) ? data.autoSellOrders.slice(0, 120) : [];
   state.autoBuyOrders = Array.isArray(data.autoBuyOrders) ? data.autoBuyOrders.slice(0, 120) : [];
+  state.virtualTime = Math.max(0, toInt(data.virtualTime, Date.now()));
+  state.virtualDateKey = typeof data.virtualDateKey === "string" ? data.virtualDateKey : dateKeyFromTime(state.virtualTime);
 
   if (Array.isArray(data.stocks) && data.stocks.length) {
     const oldMap = new Map(data.stocks.map(s => [s.code, s]));
@@ -305,6 +349,8 @@ function loadState() {
       stock.eventBias = toNum(old.eventBias, 0);
       stock.eventTicks = Math.max(0, toInt(old.eventTicks, 0));
       stock.history = Array.isArray(old.history) ? old.history.map(v => Math.max(1, toInt(v, stock.currentPrice))).slice(-240) : stock.history;
+      stock.historyLong = Array.isArray(old.historyLong) ? old.historyLong.map(v => Math.max(1, toInt(v, stock.currentPrice))).slice(-2000) : stock.history.slice(-180);
+      stock.haltedDirection = old.haltedDirection || null;
       buildOrderbook(stock);
       return stock;
     });
@@ -349,6 +395,22 @@ function stockRate(stock) {
 }
 function stockDiff(stock) {
   return stock.currentPrice - stock.prevClose;
+}
+function unrealizedProfit() {
+  return Object.entries(state.portfolio.holdings).reduce((sum, [code, h]) => {
+    const s = state.stocks.find(x => x.code === code);
+    if (!s) return sum;
+    return sum + ((s.currentPrice - h.avgPrice) * h.qty);
+  }, 0);
+}
+function hasAnyHolding() {
+  return Object.values(state.portfolio.holdings).some(h => (h?.qty || 0) > 0);
+}
+function getUpperLimitPrice(stock) {
+  return Math.max(1, Math.round(stock.prevClose * (1 + state.settings.upperLimitRate)));
+}
+function getLowerLimitPrice(stock) {
+  return Math.max(1, Math.round(stock.prevClose * (1 - state.settings.lowerLimitRate)));
 }
 
 function buildOrderbook(stock) {
@@ -426,6 +488,43 @@ function toast(text) {
   renderHistory();
 }
 
+function rollVirtualTime() {
+  const minutePerLoopMap = {
+    1: 1,
+    2: 2,
+    5: 5,
+    10: 10,
+    20: 20,
+    50: 45,
+    100: 90,
+    200: 180,
+    300: 360
+  };
+  const addMinutes = minutePerLoopMap[state.speed] || 1;
+  state.virtualTime += addMinutes * 60 * 1000;
+  const newKey = dateKeyFromTime(state.virtualTime);
+  if (newKey !== state.virtualDateKey) {
+    state.virtualDateKey = newKey;
+    onVirtualDayChanged();
+  }
+}
+
+function onVirtualDayChanged() {
+  state.stocks.forEach(stock => {
+    stock.prevClose = stock.currentPrice;
+    stock.openPrice = stock.currentPrice;
+    stock.dayHigh = stock.currentPrice;
+    stock.dayLow = stock.currentPrice;
+    stock.volume = Math.max(1000, Math.round(stock.volume * 0.15));
+    stock.haltedDirection = null;
+    stock.eventBias = 0;
+    stock.eventTicks = 0;
+    stock.historyLong.push(stock.currentPrice);
+    if (stock.historyLong.length > 3000) stock.historyLong.shift();
+  });
+  addAlert(`가상 날짜 변경 · ${formatVirtualDateTime()}`, "event");
+}
+
 function maybeCreateNews(stock) {
   const chance = 0.004 * state.settings.newsFrequency;
   if (Math.random() > chance) return;
@@ -443,6 +542,12 @@ function maybeCreateNews(stock) {
 }
 
 function updateOneStock(stock) {
+  if (stock.haltedDirection) {
+    buildOrderbook(stock);
+    stock.flash = 0;
+    return;
+  }
+
   maybeCreateNews(stock);
 
   const oldPrice = stock.currentPrice;
@@ -465,6 +570,21 @@ function updateOneStock(stock) {
 
   let next = Math.max(1, Math.round(stock.currentPrice * (1 + move)));
 
+  if (state.settings.dailyLimitEnabled) {
+    const upper = getUpperLimitPrice(stock);
+    const lower = getLowerLimitPrice(stock);
+    if (next >= upper) {
+      next = upper;
+      stock.haltedDirection = "up";
+      pushNews("breaking", stock, "상한가에 도달했어요", 0.15);
+    }
+    if (next <= lower) {
+      next = lower;
+      stock.haltedDirection = "down";
+      pushNews("bad", stock, "하한가에 도달했어요", -0.15);
+    }
+  }
+
   stock.currentPrice = next;
   stock.dayHigh = Math.max(stock.dayHigh, next);
   stock.dayLow = Math.min(stock.dayLow, next);
@@ -474,6 +594,11 @@ function updateOneStock(stock) {
   );
   stock.history.push(next);
   if (stock.history.length > 240) stock.history.shift();
+
+  if (Math.random() < 0.12) {
+    stock.historyLong.push(next);
+    if (stock.historyLong.length > 3000) stock.historyLong.shift();
+  }
 
   stock.momentum = clamp(stock.momentum * 0.92 + (next > oldPrice ? 0.28 : -0.28), -3, 3);
   if (stock.eventTicks > 0) stock.eventTicks -= 1;
@@ -532,6 +657,11 @@ function executeSell(code, qty, price, reason = "현재가 매도") {
     state.portfolio.holdings[code] = { qty: h.qty - qty, avgPrice: h.avgPrice };
   }
 
+  if (!hasAnyHolding()) {
+    state.realizedProfit = 0;
+    state.baseline = { totalAsset: totalAsset(), startedAt: Date.now() };
+  }
+
   recordOrder({ type: "sell", stockName: stock.name, code, qty, price, fee, total, reason });
   return true;
 }
@@ -564,7 +694,6 @@ function processAutoOrders() {
   state.autoBuyOrders.forEach(order => {
     const stock = state.stocks.find(s => s.code === order.code);
     if (!stock) { removeBuyIds.push(order.id); return; }
-
     if (stock.currentPrice > order.targetPrice) return;
 
     let qty = order.useMax
@@ -594,27 +723,31 @@ function processAutoOrders() {
 
 function getSpeedProfile(speed) {
   const map = {
-    1: { delay: 1000, loops: 1 },
-    2: { delay: 520, loops: 1 },
-    5: { delay: 240, loops: 1 },
-    10: { delay: 130, loops: 1 },
-    20: { delay: 70, loops: 2 },
-    50: { delay: 30, loops: 3 },
-    100: { delay: 16, loops: 4 },
-    200: { delay: 9, loops: 6 },
-    300: { delay: 6, loops: 8 }
+    1: { delay: 1000, loops: 1, chartEvery: 1 },
+    2: { delay: 520, loops: 1, chartEvery: 1 },
+    5: { delay: 240, loops: 1, chartEvery: 1 },
+    10: { delay: 130, loops: 1, chartEvery: 2 },
+    20: { delay: 70, loops: 2, chartEvery: 3 },
+    50: { delay: 30, loops: 3, chartEvery: 5 },
+    100: { delay: 16, loops: 4, chartEvery: 8 },
+    200: { delay: 9, loops: 6, chartEvery: 12 },
+    300: { delay: 6, loops: 8, chartEvery: 16 }
   };
   return map[speed] || map[1];
 }
 
 function tickOnce() {
   if (state.isPaused || state.isStopped) return;
+
   const profile = getSpeedProfile(state.speed);
   for (let i = 0; i < profile.loops; i++) {
+    rollVirtualTime();
     state.stocks.forEach(updateOneStock);
     processAutoOrders();
   }
-  render();
+
+  state.chartRenderCounter += 1;
+  render(state.chartRenderCounter % profile.chartEvery === 0);
   queueSave();
 }
 
@@ -651,6 +784,8 @@ function collectEls() {
   els.adminEntryBtn = byId("adminEntryBtn");
   els.saveSlotBtn = byId("saveSlotBtn");
   els.loadSlotBtn = byId("loadSlotBtn");
+  els.virtualClockChip = byId("virtualClockChip");
+
   els.adminOverlay = byId("adminOverlay");
   els.adminCodeInput = byId("adminCodeInput");
   els.adminLoginBtn = byId("adminLoginBtn");
@@ -672,6 +807,9 @@ function collectEls() {
   els.adminCancelAllAutoSellBtn = byId("adminCancelAllAutoSellBtn");
   els.adminCancelAllAutoBuyBtn = byId("adminCancelAllAutoBuyBtn");
   els.adminResetAllBtn = byId("adminResetAllBtn");
+  els.adminDailyLimitEnabled = byId("adminDailyLimitEnabled");
+  els.adminUpperLimitRate = byId("adminUpperLimitRate");
+  els.adminLowerLimitRate = byId("adminLowerLimitRate");
 }
 
 function injectExtraUI() {
@@ -680,6 +818,15 @@ function injectExtraUI() {
   if (brandTitle) brandTitle.textContent = "주식 모의증권";
   const brandSub = q(".brand-sub");
   if (brandSub) brandSub.textContent = "GitHub Pages Edition";
+
+  const topSummaryRow = q(".top-summary-row");
+  if (topSummaryRow && !byId("virtualClockChip")) {
+    const div = document.createElement("div");
+    div.id = "virtualClockChip";
+    div.className = "summary-card";
+    div.innerHTML = `<div class="summary-label">가상시간</div><div class="summary-value" style="font-size:15px">${formatVirtualDateTime()}</div>`;
+    topSummaryRow.appendChild(div);
+  }
 
   const headerActions = q(".header-actions");
   if (headerActions && !byId("saveSlotBtn")) {
@@ -731,6 +878,11 @@ function injectExtraUI() {
       <button class="top-action-btn control-btn" id="toggleActiveOrdersBtn" type="button" style="flex:1">자동매매 비우기</button>
     `;
     portfolioPanel.appendChild(row);
+  }
+
+  const chartTabs = q(".chart-tabs");
+  if (chartTabs) {
+    chartTabs.innerHTML = CHART_RANGES.map(r => `<button type="button" class="tab-btn ${r.key === state.chartRange ? "active" : ""}" data-chart-range="${r.key}">${r.label}</button>`).join("");
   }
 
   const orderPanel = q(".order-panel");
@@ -832,8 +984,14 @@ function injectExtraUI() {
             <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">뉴스 빈도<input id="adminNewsFreq" type="number" min="0.2" step="0.1" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
           </div>
 
-          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px">
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px">
             <label class="checkbox-label"><input id="adminHighSpeedEnabled" type="checkbox"><span>100x / 200x / 300x 활성화</span></label>
+            <label class="checkbox-label"><input id="adminDailyLimitEnabled" type="checkbox"><span>상한/하한 활성화</span></label>
+            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">상한율<input id="adminUpperLimitRate" type="number" min="0.05" step="0.01" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px">
+            <label style="display:flex;flex-direction:column;gap:8px;color:#93a4c9;font-size:13px">하한율<input id="adminLowerLimitRate" type="number" min="0.05" step="0.01" style="min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:#081224;color:#fff;padding:12px 14px"></label>
             <button id="saveAdminSettingsBtn" type="button" class="top-action-btn control-btn">설정 반영</button>
             <button id="forceBaselineResetBtn" type="button" class="top-action-btn control-btn">수익률 기준 리셋</button>
           </div>
@@ -862,7 +1020,7 @@ function injectExtraUI() {
       .price-flash-down{animation:priceDown .55s ease}
       @keyframes priceUp{0%{text-shadow:0 0 0 rgba(0,0,0,0)}50%{text-shadow:0 0 18px rgba(78,225,143,.65)}100%{text-shadow:0 0 0 rgba(0,0,0,0)}}
       @keyframes priceDown{0%{text-shadow:0 0 0 rgba(0,0,0,0)}50%{text-shadow:0 0 18px rgba(255,95,130,.65)}100%{text-shadow:0 0 0 rgba(0,0,0,0)}}
-      @media (max-width:860px){#adminPanelBox > div:first-child{grid-template-columns:1fr !important}}
+      @media (max-width:860px){#adminPanelBox > div{grid-template-columns:1fr !important}}
     `;
     document.head.appendChild(style);
   }
@@ -874,6 +1032,8 @@ function renderTop() {
   setText(els.totalAssetTop, formatKRW(totalAsset()));
   setText(els.profitLossTop, `${formatSignedKRW(baselineProfit())} (${formatSignedPct(baselineProfitRate())})`);
   setText(els.cashTop, formatKRW(state.portfolio.cash));
+  setText(els.virtualClockChip, formatVirtualDateTime());
+
   if (els.profitLossTop) {
     els.profitLossTop.classList.remove("up", "down");
     els.profitLossTop.classList.add(baselineProfit() >= 0 ? "up" : "down");
@@ -932,11 +1092,7 @@ function renderHero() {
 }
 
 function renderPortfolio() {
-  const unrealized = Object.entries(state.portfolio.holdings).reduce((sum, [code, h]) => {
-    const stock = state.stocks.find(s => s.code === code);
-    if (!stock) return sum;
-    return sum + ((stock.currentPrice - h.avgPrice) * h.qty);
-  }, 0);
+  const unrealized = unrealizedProfit();
 
   setText(els.portfolioTotal, `${formatKRW(totalAsset())} · ${formatSignedPct(baselineProfitRate())}`);
   setText(els.portfolioPL, `${formatSignedKRW(baselineProfit())} (${formatSignedPct(baselineProfitRate())})`);
@@ -1091,7 +1247,7 @@ function renderWatchlist() {
   qa(".watch-item", els.watchlist).forEach(btn => {
     addEvent(btn, "click", () => {
       state.selectedCode = btn.dataset.code;
-      render();
+      render(true);
       queueSave();
     });
   });
@@ -1157,12 +1313,9 @@ function updateQuickButtons(maxBuyQty, holdingQty) {
     Math.max(1, Math.floor(base * 0.75)),
     Math.max(1, Math.floor(base * 1.00))
   ];
-
   const labels = ["10%", "25%", "50%", "75%", "100%"];
 
-  els.quickRow.innerHTML = labels.map((label, idx) => {
-    return `<button type="button" data-qty="${values[idx]}">${label}</button>`;
-  }).join("");
+  els.quickRow.innerHTML = labels.map((label, idx) => `<button type="button" data-qty="${values[idx]}">${label}</button>`).join("");
 
   qa("button", els.quickRow).forEach(btn => {
     addEvent(btn, "click", () => {
@@ -1222,7 +1375,7 @@ function submitOrder() {
   }
 
   updateOrderInputs();
-  render();
+  render(true);
   queueSave();
 }
 
@@ -1341,11 +1494,18 @@ function renderAutoLists() {
 }
 
 function getChartSeries(stock) {
-  const hist = stock.history || [];
-  if (state.chartRange === "1m") return hist.slice(-60);
-  if (state.chartRange === "5m") return hist.slice(-100);
-  if (state.chartRange === "1d") return hist.slice(-160);
-  return hist.slice(-220);
+  if (!stock) return [];
+  const short = stock.history || [];
+  const long = stock.historyLong || short;
+
+  if (state.chartRange === "1m") return short.slice(-60);
+  if (state.chartRange === "5m") return short.slice(-100);
+  if (state.chartRange === "1d") return short.slice(-180);
+  if (state.chartRange === "1w") return long.slice(-300);
+  if (state.chartRange === "1y") return long.filter((_, i) => i % 2 === 0).slice(-500);
+  if (state.chartRange === "10y") return long.filter((_, i) => i % 5 === 0).slice(-600);
+  if (state.chartRange === "100y") return long.filter((_, i) => i % 10 === 0).slice(-700);
+  return short.slice(-100);
 }
 
 function movingAverage(series, period) {
@@ -1390,6 +1550,8 @@ function drawChart() {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
 
   const series = getChartSeries(stock);
+  if (!series.length) return;
+
   const ma5 = movingAverage(series, 5);
   const ma20 = movingAverage(series, 20);
   const ma60 = movingAverage(series, 60);
@@ -1447,7 +1609,7 @@ function drawChart() {
   ctx.fillStyle = "rgba(255,255,255,.65)";
   ctx.font = "12px Segoe UI, Apple SD Gothic Neo, Malgun Gothic, sans-serif";
   ctx.fillText(stock.name, padding.left, 22);
-  ctx.fillText(`${formatSignedPct(stockRate(stock))} · 시가 ${formatKRW(stock.openPrice)}`, padding.left, height - 14);
+  ctx.fillText(`${formatSignedPct(stockRate(stock))} · 시가 ${formatKRW(stock.openPrice)} · 가상 ${formatVirtualDateTime()}`, padding.left, height - 14);
 
   bindChartTooltip(series, xOf, yOf, stock, width, height);
 }
@@ -1474,10 +1636,11 @@ function bindChartTooltip(series, xOf, yOf, stock, width, height) {
       <div class="${pct >= 0 ? "up" : "down"}">등락률: ${formatSignedPct(pct)}</div>
       <div>거래량 느낌: ${formatVolume(volHint)}</div>
       <div>인덱스: ${idx + 1} / ${series.length}</div>
+      <div>가상시간: ${formatVirtualDateTime()}</div>
     `;
 
     const left = clamp(xOf(idx) + 14, 8, width - 220);
-    const top = clamp(yOf(price) - 78, 8, height - 120);
+    const top = clamp(yOf(price) - 98, 8, height - 150);
     tooltip.style.left = `${left}px`;
     tooltip.style.top = `${top}px`;
   };
@@ -1506,6 +1669,9 @@ function renderAdminPanelState() {
   if (els.adminVolatility) els.adminVolatility.value = state.settings.globalVolatility;
   if (els.adminNewsFreq) els.adminNewsFreq.value = state.settings.newsFrequency;
   if (els.adminHighSpeedEnabled) els.adminHighSpeedEnabled.checked = !!state.settings.adminHighSpeedEnabled;
+  if (els.adminDailyLimitEnabled) els.adminDailyLimitEnabled.checked = !!state.settings.dailyLimitEnabled;
+  if (els.adminUpperLimitRate) els.adminUpperLimitRate.value = state.settings.upperLimitRate;
+  if (els.adminLowerLimitRate) els.adminLowerLimitRate.value = state.settings.lowerLimitRate;
 
   if (els.adminStockSelect) {
     els.adminStockSelect.innerHTML = state.stocks.map(s => `<option value="${s.code}">${s.name}</option>`).join("");
@@ -1517,7 +1683,7 @@ function renderAdminPanelState() {
   }
 }
 
-function render() {
+function render(shouldDrawChart = true) {
   renderTop();
   renderHero();
   renderPortfolio();
@@ -1533,7 +1699,7 @@ function render() {
   renderHistoryTabs();
   updateOrderInputs();
   setOrderMode(state.orderMode);
-  drawChart();
+  if (shouldDrawChart) drawChart();
   renderAdminPanelState();
 }
 
@@ -1544,14 +1710,14 @@ function claimSupportFund() {
   }
   state.portfolio.cash += state.settings.supportFundAmount;
   toast(`${formatKRW(state.settings.supportFundAmount)} 지급 완료`);
-  render();
+  render(true);
   queueSave();
 }
 
 function resetBaseline() {
   state.baseline = { totalAsset: totalAsset(), startedAt: Date.now() };
   toast("현재 총자산 기준으로 수익률 기준이 리셋됐어요.");
-  render();
+  render(true);
   queueSave();
 }
 
@@ -1562,7 +1728,7 @@ function resetAllData() {
   injectExtraUI();
   collectEls();
   bindDynamicEvents();
-  render();
+  render(true);
   restartTick();
 }
 
@@ -1584,16 +1750,15 @@ function doExportSave() {
 function doImportSave() {
   const raw = window.prompt("저장 문자열을 붙여넣어 주세요.");
   if (!raw) return;
-
   try {
     const json = decodeURIComponent(escape(atob(raw.trim())));
     const parsed = JSON.parse(json);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
     loadState();
-    render();
+    render(true);
     restartTick();
     toast("불러오기가 완료됐어요.");
-  } catch (e) {
+  } catch {
     toast("불러오기 문자열이 올바르지 않아요.");
   }
 }
@@ -1601,7 +1766,7 @@ function doImportSave() {
 function bindDynamicEvents() {
   addEvent(els.heroStockSelect, "change", () => {
     state.selectedCode = els.heroStockSelect.value;
-    render();
+    render(true);
     queueSave();
   });
 
@@ -1702,12 +1867,15 @@ function bindDynamicEvents() {
     state.settings.globalVolatility = clamp(toNum(els.adminVolatility?.value, state.settings.globalVolatility), 0.2, 10);
     state.settings.newsFrequency = clamp(toNum(els.adminNewsFreq?.value, state.settings.newsFrequency), 0.2, 10);
     state.settings.adminHighSpeedEnabled = !!els.adminHighSpeedEnabled?.checked;
+    state.settings.dailyLimitEnabled = !!els.adminDailyLimitEnabled?.checked;
+    state.settings.upperLimitRate = clamp(toNum(els.adminUpperLimitRate?.value, state.settings.upperLimitRate), 0.05, 10);
+    state.settings.lowerLimitRate = clamp(toNum(els.adminLowerLimitRate?.value, state.settings.lowerLimitRate), 0.05, 0.99);
 
     if (state.speed > 50 && !state.settings.adminHighSpeedEnabled) state.speed = 50;
 
     renderSpeedButtons();
     restartTick();
-    render();
+    render(true);
     queueSave();
     toast("관리자 설정이 반영됐어요.");
   });
@@ -1724,13 +1892,12 @@ function bindDynamicEvents() {
     stock.dayLow = Math.min(stock.dayLow, price);
     stock.history.push(price);
     if (stock.history.length > 240) stock.history.shift();
+    stock.historyLong.push(price);
+    if (stock.historyLong.length > 3000) stock.historyLong.shift();
     buildOrderbook(stock);
 
-    if (state.selectedCode === code) {
-      render();
-    } else {
-      renderWatchlist();
-    }
+    if (state.selectedCode === code) render(true);
+    else render(false);
     queueSave();
     toast(`${stock.name} 현재가를 ${formatKRW(price)}로 반영했어요.`);
   });
@@ -1780,7 +1947,7 @@ function init() {
   bindStaticTopEvents();
   bindDynamicEvents();
   setOrderMode(state.orderMode);
-  render();
+  render(true);
   restartTick();
 }
 
