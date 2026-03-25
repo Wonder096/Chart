@@ -1,4 +1,4 @@
-const STORAGE_KEY = "stock_mock_sim_toss_v41";
+const STORAGE_KEY = "stock_mock_sim_toss_v45";
 const ADMIN_CODE = "010814";
 
 const DEFAULT_SETTINGS = {
@@ -184,7 +184,7 @@ function formatVolume(v) {
 }
 function formatBigNumber(v) {
   const n = Math.round(toNum(v));
-  return `${n >= 0 ? "+" : ""}${Math.abs(n).toLocaleString("ko-KR")}`;
+  return `${n >= 0 ? "+" : "-"}${Math.abs(n).toLocaleString("ko-KR")}`;
 }
 function nowTime() {
   const d = new Date(state.virtualTime || Date.now());
@@ -213,7 +213,7 @@ function allowedSpeeds() {
   return state.isAdmin && state.settings.adminHighSpeedEnabled ? [...SPEEDS_BASE, ...SPEEDS_ADMIN] : [...SPEEDS_BASE];
 }
 function typeLabel(type) {
-  return ({ good: "호재", bad: "악재", event: "이벤트", breaking: "속보" })[type] || "알림";
+  return ({ good: "호재", bad: "악재", event: "이벤트", breaking: "속보", vi: "VI", rebound: "회복" })[type] || "알림";
 }
 
 function makeStock([code, name, logo, theme, base, priceClass, style]) {
@@ -246,6 +246,10 @@ function makeStock([code, name, logo, theme, base, priceClass, style]) {
     eventTicks: 0,
     flash: 0,
     haltedDirection: null,
+    halted: false,
+    haltReason: null,
+    haltTimer: 0,
+    pendingRecovery: 0,
     isFixed: false
   };
 }
@@ -260,6 +264,15 @@ function makeQuoteTick(stock) {
     volume: randInt(1000, 50000),
     time: nowTime()
   };
+}
+
+function randomPastDateLabel(offset) {
+  const d = new Date(state.virtualTime || Date.now());
+  d.setDate(d.getDate() - offset);
+  const yy = String(d.getFullYear()).slice(2);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yy}.${mm}.${dd}`;
 }
 
 function initInvestorFlow(code) {
@@ -282,15 +295,6 @@ function initInvestorFlow(code) {
     });
   }
   state.investorFlows[code] = rows;
-}
-
-function randomPastDateLabel(offset) {
-  const d = new Date(state.virtualTime || Date.now());
-  d.setDate(d.getDate() - offset);
-  const yy = String(d.getFullYear()).slice(2);
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yy}.${mm}.${dd}`;
 }
 
 function defaultState() {
@@ -375,7 +379,7 @@ function loadState() {
   const data = safeJsonParse(raw, null);
   if (!data || typeof data !== "object") return;
 
-  state.speed = allowedSpeeds().includes(toInt(data.speed, 1)) ? toInt(data.speed, 1) : 1;
+  state.speed = [1, 2, 5, 10, 20, 50, 100, 200, 300].includes(toInt(data.speed, 1)) ? toInt(data.speed, 1) : 1;
   state.selectedCode = typeof data.selectedCode === "string" ? data.selectedCode : "KQ001";
   state.orderMode = data.orderMode === "sell" ? "sell" : "buy";
   state.sortBy = ["change", "volume"].includes(data.sortBy) ? data.sortBy : "change";
@@ -444,6 +448,10 @@ function loadState() {
     fresh.eventTicks = Math.max(0, toInt(old.eventTicks, 0));
     fresh.flash = 0;
     fresh.haltedDirection = old.haltedDirection || null;
+    fresh.halted = !!old.halted;
+    fresh.haltReason = old.haltReason || null;
+    fresh.haltTimer = Math.max(0, toInt(old.haltTimer, 0));
+    fresh.pendingRecovery = Math.max(0, toInt(old.pendingRecovery, 0));
     fresh.isFixed = !!old.isFixed;
     return fresh;
   });
@@ -461,7 +469,9 @@ function loadState() {
     state.selectedCode = state.stocks[0]?.code || "KQ001";
   }
 
-  if (!allowedSpeeds().includes(state.speed)) state.speed = 50;
+  if (!(state.isAdmin && state.settings.adminHighSpeedEnabled) && state.speed > 50) {
+    state.speed = 50;
+  }
 }
 
 function selectedStock() {
@@ -514,6 +524,9 @@ function getUpperLimitPrice(stock) {
 }
 function getLowerLimitPrice(stock) {
   return Math.max(1, Math.round(stock.prevClose * (1 - state.settings.lowerLimitRate)));
+}
+function isTradingBlocked(stock) {
+  return !!(stock && stock.halted);
 }
 
 function buildOrderbook(stock) {
@@ -613,6 +626,10 @@ function onVirtualDayChanged() {
     stock.dayLow = stock.currentPrice;
     stock.volume = Math.max(1000, Math.round(stock.volume * 0.15));
     stock.haltedDirection = null;
+    stock.halted = false;
+    stock.haltReason = null;
+    stock.haltTimer = 0;
+    stock.pendingRecovery = 0;
     stock.eventBias = 0;
     stock.eventTicks = 0;
     stock.historyLong.push(stock.currentPrice);
@@ -638,17 +655,17 @@ function maybeCreateNews(stock) {
   const chance = 0.004 * state.settings.newsFrequency;
   if (Math.random() > chance) return;
 
-  if (stock.priceClass === "cheap" && stock.currentPrice <= 120 && Math.random() < 0.28) {
-    const jump = stock.currentPrice <= 25 ? rand(1.5, 5.5) : rand(0.35, 1.8);
+  if (stock.priceClass === "cheap" && stock.currentPrice <= 120 && Math.random() < 0.22) {
+    const jump = stock.currentPrice <= 25 ? rand(1.2, 4.4) : rand(0.3, 1.4);
     stock.eventBias = jump;
     stock.eventTicks = randInt(3, 8);
     pushNews("good", stock, "저가주 회복 수급이 붙으며 급반등 기대가 커지고 있어요", jump);
     return;
   }
 
-  if (stock.currentPrice >= 120 && stock.currentPrice <= 4000 && Math.random() < 0.14) {
+  if (stock.currentPrice >= 120 && stock.currentPrice <= 4000 && Math.random() < 0.1) {
     const targetLift = randInt(300, 3000);
-    const impact = clamp(targetLift / Math.max(1, stock.currentPrice), 0.12, 1.8);
+    const impact = clamp(targetLift / Math.max(1, stock.currentPrice), 0.08, 1.6);
     stock.eventBias = impact;
     stock.eventTicks = randInt(2, 6);
     pushNews("breaking", stock, `테마성 수급이 몰리며 ${targetLift.toLocaleString("ko-KR")}원 급등 기대가 붙고 있어요`, impact);
@@ -667,9 +684,70 @@ function maybeCreateNews(stock) {
   pushNews(type, stock, pick(GENERIC_NEWS[type]), impact);
 }
 
+function triggerVI(stock, reason) {
+  if (!stock || stock.halted) return;
+
+  stock.halted = true;
+  stock.haltReason = reason;
+  stock.haltTimer =
+    reason === "LOWER_VI" ? randInt(10, 18) :
+    reason === "PENNY_VI" ? randInt(10, 20) :
+    randInt(5, 10);
+
+  if (reason === "LOWER_VI" || reason === "PENNY_VI") {
+    stock.pendingRecovery = stock.currentPrice < 100
+      ? randInt(300, 3000)
+      : randInt(300, 1800);
+
+    pushNews(
+      "vi",
+      stock,
+      reason === "PENNY_VI"
+        ? "100원 미만 급락으로 VI가 발동됐어요. 기관 개입 가능성이 거론돼요"
+        : "하한가 부근 급락으로 VI가 발동됐어요. 기관 방어 수급이 유입될 수 있어요",
+      -0.12
+    );
+  } else if (reason === "UPPER_VI") {
+    stock.pendingRecovery = 0;
+    pushNews("vi", stock, "상한가 도달로 과열 VI가 발동됐어요", 0.14);
+  }
+}
+
+function recoverFromVI(stock) {
+  if (!stock) return;
+
+  const reason = stock.haltReason;
+  stock.halted = false;
+  stock.haltReason = null;
+  stock.haltTimer = 0;
+
+  if (reason === "LOWER_VI" || reason === "PENNY_VI") {
+    const rebound = Math.max(300, stock.pendingRecovery || randInt(300, 1800));
+    const institutionPush = randInt(1, 3);
+    stock.currentPrice = Math.max(stock.currentPrice + rebound, reason === "PENNY_VI" ? randInt(280, 800) : stock.currentPrice + rebound);
+    stock.dayHigh = Math.max(stock.dayHigh, stock.currentPrice);
+    stock.dayLow = Math.min(stock.dayLow, stock.currentPrice);
+    stock.eventBias = rand(0.02, 0.08) * institutionPush;
+    stock.eventTicks = randInt(4, 10);
+    stock.momentum = clamp(stock.momentum + rand(0.5, 1.6), -3, 3);
+    pushNews("rebound", stock, `기관 개입으로 ${formatKRW(rebound)} 규모의 강제 반등이 나왔어요. 거래가 재개됐어요`, 0.12);
+  } else if (reason === "UPPER_VI") {
+    stock.eventBias = rand(-0.01, 0.015);
+    stock.eventTicks = randInt(2, 5);
+    pushNews("event", stock, "과열 VI가 해제되며 거래가 재개됐어요", 0.03);
+  }
+
+  stock.pendingRecovery = 0;
+  stock.history.push(stock.currentPrice);
+  if (stock.history.length > 240) stock.history.shift();
+  stock.historyLong.push(stock.currentPrice);
+  if (stock.historyLong.length > 3000) stock.historyLong.shift();
+  buildOrderbook(stock);
+}
+
 function updateQuoteTicks(stock, oldPrice) {
   const list = Array.isArray(state.quoteTicks[stock.code]) ? state.quoteTicks[stock.code] : [];
-  const count = state.speed >= 100 ? 6 : state.speed >= 20 ? 4 : 2;
+  const count = state.speed >= 200 ? 8 : state.speed >= 100 ? 6 : state.speed >= 20 ? 4 : 2;
   for (let i = 0; i < count; i++) {
     const price = Math.max(1, stock.currentPrice + randInt(-Math.max(1, Math.round(stock.currentPrice * 0.002)), Math.max(1, Math.round(stock.currentPrice * 0.002))));
     list.unshift({
@@ -690,13 +768,20 @@ function updateQuoteTicks(stock, oldPrice) {
     const delta = stock.currentPrice - oldPrice;
     first.personal += randInt(-800000, 800000) + (delta < 0 ? randInt(0, 300000) : -randInt(0, 180000));
     first.foreign += randInt(-900000, 900000) + (delta > 0 ? randInt(0, 250000) : -randInt(0, 250000));
-    first.institution += randInt(-600000, 600000) + randInt(-150000, 150000);
+    first.institution += randInt(-600000, 600000) + (delta < 0 ? randInt(120000, 540000) : randInt(-180000, 180000));
   }
 }
 
 function updateOneStock(stock) {
   if (!stock) return;
   const oldPrice = stock.currentPrice;
+
+  if (stock.halted) {
+    if (stock.haltTimer > 0) stock.haltTimer -= 1;
+    if (stock.haltTimer <= 0) recoverFromVI(stock);
+    updateQuoteTicks(stock, oldPrice);
+    return;
+  }
 
   if (stock.isFixed) {
     stock.flash = 0;
@@ -727,23 +812,37 @@ function updateOneStock(stock) {
   if (state.settings.dailyLimitEnabled) {
     const upper = getUpperLimitPrice(stock);
     const lower = getLowerLimitPrice(stock);
+
     if (next >= upper) {
       next = upper;
       stock.haltedDirection = "up";
-      stock.eventBias = rand(-0.01, 0.018);
-      stock.eventTicks = randInt(1, 3);
-      pushNews("breaking", stock, "상한가에 도달하며 과열 경고가 붙었어요", 0.15);
+      triggerVI(stock, "UPPER_VI");
     } else if (next <= lower) {
       next = lower;
       stock.haltedDirection = "down";
-      stock.eventBias = rand(0.01, 0.05);
-      stock.eventTicks = randInt(3, 10);
-      pushNews("bad", stock, "하한가 도달로 VI가 발동됐어요", -0.15);
+      triggerVI(stock, "LOWER_VI");
     } else {
       stock.haltedDirection = null;
     }
   } else {
     stock.haltedDirection = null;
+  }
+
+  if (next < 100) {
+    next = Math.max(1, next);
+    stock.currentPrice = next;
+    stock.dayHigh = Math.max(stock.dayHigh, next);
+    stock.dayLow = Math.min(stock.dayLow, next);
+    stock.history.push(next);
+    if (stock.history.length > 240) stock.history.shift();
+    stock.historyLong.push(next);
+    if (stock.historyLong.length > 3000) stock.historyLong.shift();
+    stock.volume += Math.max(1, randInt(1000, 20000));
+    stock.flash = next > oldPrice ? 1 : next < oldPrice ? -1 : 0;
+    triggerVI(stock, "PENNY_VI");
+    buildOrderbook(stock);
+    updateQuoteTicks(stock, oldPrice);
+    return;
   }
 
   stock.currentPrice = next;
@@ -775,7 +874,7 @@ function processAutoOrders() {
     for (const order of state.autoBuyOrders) {
       const stock = stocksByCode.get(order.code);
       if (!stock) continue;
-      if (stock.haltedDirection === "down") {
+      if (isTradingBlocked(stock)) {
         remain.push(order);
         continue;
       }
@@ -808,7 +907,7 @@ function processAutoOrders() {
     for (const order of state.autoSellOrders) {
       const stock = stocksByCode.get(order.code);
       if (!stock) continue;
-      if (stock.haltedDirection === "down") {
+      if (isTradingBlocked(stock)) {
         remain.push(order);
         continue;
       }
@@ -885,13 +984,15 @@ function clearHistories() {
 
 function executeBuy(stock, qty, price, isAuto = false, reason = "매수") {
   if (!stock || qty <= 0 || price <= 0) return false;
-  if (stock.haltedDirection === "down") {
+  if (isTradingBlocked(stock)) {
     if (!isAuto) toast(`${stock.name}은 현재 VI 상태라 거래할 수 없어요`, "down");
     return false;
   }
+
   const gross = qty * price;
   const fee = feeOf(gross);
   const total = gross + fee;
+
   if (state.portfolio.cash < total) {
     if (!isAuto) toast("주문 가능 현금이 부족해요", "down");
     return false;
@@ -903,6 +1004,7 @@ function executeBuy(stock, qty, price, isAuto = false, reason = "매수") {
   const oldAvg = holding.avgPrice || 0;
   const newQty = oldQty + qty;
   const newAvg = newQty > 0 ? ((oldQty * oldAvg) + (qty * price)) / newQty : 0;
+
   state.portfolio.holdings[stock.code] = { qty: newQty, avgPrice: newAvg };
 
   recordOrder({
@@ -924,7 +1026,7 @@ function executeBuy(stock, qty, price, isAuto = false, reason = "매수") {
 
 function executeSell(stock, qty, price, isAuto = false, reason = "매도") {
   if (!stock || qty <= 0 || price <= 0) return false;
-  if (stock.haltedDirection === "down") {
+  if (isTradingBlocked(stock)) {
     if (!isAuto) toast(`${stock.name}은 현재 VI 상태라 거래할 수 없어요`, "down");
     return false;
   }
@@ -1107,6 +1209,42 @@ function filteredStocks() {
   return list;
 }
 
+function ensureDynamicLayoutTweaks() {
+  const chartWrap = document.querySelector(".chart-wrap");
+  if (chartWrap) {
+    chartWrap.style.height = "820px";
+    chartWrap.style.minHeight = "820px";
+  }
+
+  const priceChart = els.priceChart;
+  if (priceChart) {
+    priceChart.style.width = "100%";
+    priceChart.style.height = "100%";
+    priceChart.style.display = "block";
+  }
+
+  const orderPanel = document.querySelector(".order-panel");
+  if (orderPanel) {
+    orderPanel.style.minWidth = "0";
+  }
+}
+
+function ensureOrderbookHoldingCard() {
+  const panel = document.querySelector(".orderbook-panel");
+  if (!panel) return null;
+
+  let card = byId("holdingSummaryCard");
+  if (!card) {
+    card = document.createElement("div");
+    card.id = "holdingSummaryCard";
+    card.style.marginTop = "14px";
+    card.style.paddingTop = "14px";
+    card.style.borderTop = "1px solid rgba(255,255,255,.07)";
+    panel.appendChild(card);
+  }
+  return card;
+}
+
 function renderHeroSelects() {
   if (els.heroStockSelect) {
     const current = state.selectedCode;
@@ -1139,13 +1277,15 @@ function renderHero() {
 
   setText(els.symbolLogo, stock.logo);
   setText(els.selectedName, stock.name);
-  setText(els.selectedCode, `${stock.code} · ${stock.theme}`);
+  setText(els.selectedCode, `${stock.code} · ${stock.theme}${stock.halted ? ` · ${stock.haltReason || "VI"}` : ""}`);
   setText(els.selectedPrice, formatKRW(stock.currentPrice));
 
   const diff = stockDiff(stock);
   const rate = stockRate(stock);
   if (els.selectedChange) {
-    els.selectedChange.textContent = `${formatSignedKRW(diff)} (${formatSignedPct(rate)})`;
+    let suffix = "";
+    if (stock.halted && stock.haltReason) suffix = ` · ${stock.haltReason}`;
+    els.selectedChange.textContent = `${formatSignedKRW(diff)} (${formatSignedPct(rate)})${suffix}`;
     els.selectedChange.style.color = diff >= 0 ? "var(--red)" : "var(--blue2)";
   }
 
@@ -1166,7 +1306,11 @@ function renderHero() {
   if (els.moodFill) els.moodFill.style.width = `${moodScore}%`;
 
   let moodText = "지금은 중립적인 분위기예요";
-  if (moodScore >= 75) moodText = "매수 심리가 강하고 속도가 붙는 분위기예요";
+  if (stock.halted) {
+    moodText = stock.haltReason === "LOWER_VI" || stock.haltReason === "PENNY_VI"
+      ? "VI 발동으로 거래가 일시 정지됐어요. 기관 개입 회복을 기다리는 중이에요"
+      : "과열 VI 발동으로 거래가 잠시 정지됐어요";
+  } else if (moodScore >= 75) moodText = "매수 심리가 강하고 속도가 붙는 분위기예요";
   else if (moodScore >= 60) moodText = "우상향 기대감이 조금 더 강해 보여요";
   else if (moodScore <= 25) moodText = "매도 압력이 강해서 흔들림이 큰 구간이에요";
   else if (moodScore <= 40) moodText = "조심스럽게 눌리는 흐름이 이어지고 있어요";
@@ -1215,6 +1359,7 @@ function renderChartTabs() {
       queueSave();
       renderChartTabs();
       renderChart();
+      renderChartXAxisHint();
     });
     els.chartTabs.appendChild(btn);
   });
@@ -1290,7 +1435,7 @@ function renderChart() {
   const rect = canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   const cssWidth = Math.max(300, Math.floor(rect.width || canvas.clientWidth || 1100));
-  const cssHeight = Math.max(300, Math.floor(rect.height || canvas.clientHeight || 620));
+  const cssHeight = Math.max(300, Math.floor(rect.height || canvas.clientHeight || 760));
 
   if (canvas.width !== Math.floor(cssWidth * dpr) || canvas.height !== Math.floor(cssHeight * dpr)) {
     canvas.width = Math.floor(cssWidth * dpr);
@@ -1402,7 +1547,6 @@ function renderChartXAxisHint() {
   }
 
   const series = getChartSeries(stock);
-  const count = Math.max(6, Math.min(6, series.length || 6));
   const baseTime = state.virtualTime || Date.now();
 
   const minuteSpanMap = {
@@ -1644,7 +1788,7 @@ function renderHistory() {
   }
 
   if (els.alertBadge) setText(els.alertBadge, `${state.alerts.length}`);
-  if (els.marketAlertBadge) setText(els.marketAlertBadge, `${state.news.filter(n => n.type === "breaking").length}`);
+  if (els.marketAlertBadge) setText(els.marketAlertBadge, `${state.news.filter(n => n.type === "breaking" || n.type === "vi").length}`);
 }
 
 function renderOrderbook() {
@@ -1663,18 +1807,19 @@ function renderOrderbook() {
 
     const row = document.createElement("div");
     row.className = "orderbook-row";
+    row.style.display = "grid";
     row.style.gridTemplateColumns = "1fr 120px 1fr";
     row.style.gap = "10px";
     row.style.alignItems = "center";
 
     const askWrap = document.createElement("div");
     askWrap.style.position = "relative";
-    askWrap.style.minHeight = "34px";
+    askWrap.style.minHeight = "38px";
     askWrap.style.display = "flex";
     askWrap.style.alignItems = "center";
     askWrap.style.justifyContent = "flex-end";
     askWrap.style.padding = "0 10px";
-    askWrap.style.borderRadius = "10px";
+    askWrap.style.borderRadius = "12px";
     askWrap.style.overflow = "hidden";
     askWrap.style.background = "rgba(255,255,255,.03)";
     const askBar = document.createElement("div");
@@ -1683,34 +1828,36 @@ function renderOrderbook() {
     askBar.style.top = "0";
     askBar.style.bottom = "0";
     askBar.style.width = `${(ask.qty / maxAskQty) * 100}%`;
-    askBar.style.background = "rgba(255,95,130,.22)";
+    askBar.style.background = "linear-gradient(90deg, rgba(255,95,130,.12), rgba(255,95,130,.26))";
     const askText = document.createElement("span");
     askText.style.position = "relative";
     askText.style.color = "#ff92ad";
-    askText.style.fontWeight = "800";
+    askText.style.fontWeight = "900";
+    askText.style.fontSize = "13px";
     askText.textContent = ask.qty > 0 ? ask.qty.toLocaleString("ko-KR") : "-";
     askWrap.appendChild(askBar);
     askWrap.appendChild(askText);
 
     const mid = document.createElement("div");
-    mid.style.minHeight = "34px";
+    mid.style.minHeight = "38px";
     mid.style.display = "flex";
     mid.style.alignItems = "center";
     mid.style.justifyContent = "center";
-    mid.style.borderRadius = "10px";
+    mid.style.borderRadius = "12px";
     mid.style.background = "rgba(255,255,255,.04)";
     mid.style.fontWeight = "900";
+    mid.style.fontSize = "13px";
     mid.style.color = ask.price >= stock.prevClose ? "#ff92ad" : "#67c2ff";
     mid.textContent = formatKRW(ask.price);
 
     const bidWrap = document.createElement("div");
     bidWrap.style.position = "relative";
-    bidWrap.style.minHeight = "34px";
+    bidWrap.style.minHeight = "38px";
     bidWrap.style.display = "flex";
     bidWrap.style.alignItems = "center";
     bidWrap.style.justifyContent = "flex-start";
     bidWrap.style.padding = "0 10px";
-    bidWrap.style.borderRadius = "10px";
+    bidWrap.style.borderRadius = "12px";
     bidWrap.style.overflow = "hidden";
     bidWrap.style.background = "rgba(255,255,255,.03)";
     const bidBar = document.createElement("div");
@@ -1719,11 +1866,12 @@ function renderOrderbook() {
     bidBar.style.top = "0";
     bidBar.style.bottom = "0";
     bidBar.style.width = `${(bid.qty / maxBidQty) * 100}%`;
-    bidBar.style.background = "rgba(79,149,255,.22)";
+    bidBar.style.background = "linear-gradient(90deg, rgba(79,149,255,.26), rgba(79,149,255,.12))";
     const bidText = document.createElement("span");
     bidText.style.position = "relative";
     bidText.style.color = "#67c2ff";
-    bidText.style.fontWeight = "800";
+    bidText.style.fontWeight = "900";
+    bidText.style.fontSize = "13px";
     bidText.textContent = bid.qty > 0 ? bid.qty.toLocaleString("ko-KR") : "-";
     bidWrap.appendChild(bidBar);
     bidWrap.appendChild(bidText);
@@ -1750,6 +1898,36 @@ function renderOrderbook() {
   if (els.orderStrengthValue) setText(els.orderStrengthValue, `${((bidSum / Math.max(1, askSum)) * 100).toFixed(2)}%`);
   if (els.orderSellMeta) setText(els.orderSellMeta, askSum.toLocaleString("ko-KR"));
   if (els.orderBuyMeta) setText(els.orderBuyMeta, bidSum.toLocaleString("ko-KR"));
+
+  const holdingCard = ensureOrderbookHoldingCard();
+  if (holdingCard) {
+    const holding = holdingOf(stock.code);
+    const evalProfit = holding.qty > 0 ? (stock.currentPrice - holding.avgPrice) * holding.qty : 0;
+    holdingCard.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;">
+        <div style="font-size:15px;font-weight:900;">내 보유</div>
+        <div style="font-size:11px;color:#9cb1d8;font-weight:800;">선택 종목 기준</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;">
+        <div style="padding:12px 10px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);">
+          <div style="font-size:11px;color:#93a4c9;margin-bottom:6px;">종목</div>
+          <div style="font-size:14px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${stock.name}</div>
+        </div>
+        <div style="padding:12px 10px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);">
+          <div style="font-size:11px;color:#93a4c9;margin-bottom:6px;">보유수량</div>
+          <div style="font-size:14px;font-weight:900;">${formatQty(holding.qty)}</div>
+        </div>
+        <div style="padding:12px 10px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);">
+          <div style="font-size:11px;color:#93a4c9;margin-bottom:6px;">평단</div>
+          <div style="font-size:14px;font-weight:900;">${formatKRW(holding.avgPrice)}</div>
+        </div>
+        <div style="padding:12px 10px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);">
+          <div style="font-size:11px;color:#93a4c9;margin-bottom:6px;">평가손익</div>
+          <div style="font-size:14px;font-weight:900;color:${evalProfit >= 0 ? "#ff92ad" : "#67c2ff"};">${formatSignedKRW(evalProfit)}</div>
+        </div>
+      </div>
+    `;
+  }
 }
 
 function renderOrderPanel() {
@@ -1790,6 +1968,10 @@ function renderOrderPanel() {
     els.submitOrderBtn.classList.toggle("buy", state.orderMode === "buy");
     els.submitOrderBtn.classList.toggle("sell", state.orderMode === "sell");
     els.submitOrderBtn.textContent = state.orderMode === "buy" ? "구매하기" : "판매하기";
+    els.submitOrderBtn.disabled = isTradingBlocked(stock);
+    if (isTradingBlocked(stock)) {
+      els.submitOrderBtn.textContent = stock.haltReason === "UPPER_VI" ? "과열 VI 대기중" : "VI 대기중";
+    }
   }
 
   if (els.autoModeTitle) setText(els.autoModeTitle, state.orderMode === "buy" ? "예약구매 · 조건매수" : "예약판매 · 조건매도");
@@ -1823,6 +2005,7 @@ function renderQuickButtons(stock) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = item.label;
+    btn.disabled = isTradingBlocked(stock);
     btn.addEventListener("click", item.action);
     els.quickRow.appendChild(btn);
   });
@@ -1980,7 +2163,7 @@ function renderWatchlists() {
 
       const theme = document.createElement("div");
       theme.className = "watch-theme";
-      theme.textContent = `${stock.code} · ${stock.theme}`;
+      theme.textContent = `${stock.code} · ${stock.theme}${stock.halted ? ` · ${stock.haltReason || "VI"}` : ""}`;
 
       meta.appendChild(name);
       meta.appendChild(theme);
@@ -2001,7 +2184,7 @@ function renderWatchlists() {
 
       const mini = document.createElement("div");
       mini.className = "watch-mini";
-      mini.textContent = `거래량 ${formatVolume(stock.volume)}`;
+      mini.textContent = stock.halted ? `${stock.haltReason || "VI"} · ${Math.max(0, stock.haltTimer)}틱` : `거래량 ${formatVolume(stock.volume)}`;
 
       right.appendChild(price);
       right.appendChild(rate);
@@ -2025,7 +2208,7 @@ function renderWatchlists() {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "favorite-stock-chip";
-        btn.textContent = `${stock.name} ${formatSignedPct(stockRate(stock))}`;
+        btn.textContent = `${stock.name} ${formatSignedPct(stockRate(stock))}${stock.halted ? ` · ${stock.haltReason || "VI"}` : ""}`;
         btn.addEventListener("click", () => {
           state.selectedCode = stock.code;
           queueSave();
@@ -2177,7 +2360,9 @@ function saveAdminSettings() {
   state.settings.newsFrequency = clamp(toNum(els.adminNewsFreq?.value, state.settings.newsFrequency), 0.2, 10);
   state.settings.upperLimitRate = clamp(toNum(els.adminUpperLimitRate?.value, state.settings.upperLimitRate), 0.05, 1);
   state.settings.lowerLimitRate = clamp(toNum(els.adminLowerLimitRate?.value, state.settings.lowerLimitRate), 0.05, 0.95);
+
   if (!state.settings.adminHighSpeedEnabled && state.speed > 50) state.speed = 50;
+
   queueSave();
   renderAll();
   toast("관리자 설정이 저장됐어요", "event");
@@ -2329,7 +2514,12 @@ function bindEvents() {
   addEvent(els.adminHighSpeedEnabled, "change", () => applyAdminCheckboxLive("highSpeed"));
   addEvent(els.adminStockFixed, "change", () => applyAdminCheckboxLive("fixedPrice"));
 
-  addEvent(window, "resize", () => renderChart());
+  addEvent(window, "resize", () => {
+    ensureDynamicLayoutTweaks();
+    renderChart();
+    renderChartXAxisHint();
+  });
+
   addEvent(els.adminOverlay, "click", e => {
     if (e.target === els.adminOverlay) closeAdminModal();
   });
@@ -2338,6 +2528,7 @@ function bindEvents() {
 }
 
 function renderAll() {
+  ensureDynamicLayoutTweaks();
   renderHeroSelects();
   renderSpeedButtons();
   renderChartTabs();
@@ -2361,28 +2552,25 @@ function tickLoop() {
     1: 1,
     2: 2,
     5: 4,
-    10: 6,
-    20: 10,
-    50: 18,
-    100: 30,
-    200: 55,
-    300: 80
+    10: 7,
+    20: 12,
+    50: 24,
+    100: 42,
+    200: 72,
+    300: 120
   };
 
   const loops = loopMap[state.speed] || 1;
 
   for (let step = 0; step < loops; step++) {
     rollVirtualTime();
-
     for (const stock of state.stocks) {
       updateOneStock(stock);
     }
-
     processAutoOrders();
   }
 
   state.chartRenderCounter += 1;
-
   renderHero();
   renderPortfolio();
   renderWatchlists();
@@ -2393,7 +2581,7 @@ function tickLoop() {
   renderOrderbook();
   renderChartXAxisHint();
 
-  const chartSkip = state.speed >= 200 ? 4 : state.speed >= 100 ? 3 : state.speed >= 20 ? 2 : 1;
+  const chartSkip = state.speed >= 300 ? 5 : state.speed >= 200 ? 4 : state.speed >= 100 ? 3 : state.speed >= 20 ? 2 : 1;
   if (state.chartRenderCounter % chartSkip === 0) {
     renderChart();
   }
@@ -2407,7 +2595,7 @@ function collectElements() {
     "supportFundBtn","pauseBtn","resumeBtn","stopBtn","resetBtn","saveSlotBtn","loadSlotBtn","adminEntryBtn","alertBellBtn","alertBadge",
     "symbolLogo","selectedName","selectedCode","favoriteToggleBtn","heroStockSelect",
     "selectedPrice","selectedChange","dayHigh","dayLow","dayOpen","dayVolume",
-    "speedButtons","moodFill","moodText","chartTabs","priceChart","chartTooltip",
+    "speedButtons","moodFill","moodText","chartTabs","priceChart","chartTooltip","chartXAxisHint",
     "selectedNewsTitleName","selectedNewsCount","selectedNewsFeed",
     "holdingQtyInline","avgPriceInline","availableCash","maxBuyQty","currentHoldingQty","currentAvgPrice",
     "buyModeBtn","sellModeBtn","currentTradePriceLabel","orderPrice","orderQty","quickRow","estimatedCost","estimatedFee","submitOrderBtn",
